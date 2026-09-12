@@ -1,14 +1,25 @@
 import { FC, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Box, Button, Card, InputBase, Stack, Typography } from "@mui/material";
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  InputBase,
+  Stack,
+  Typography,
+} from "@mui/material";
+import { useReadContract } from "wagmi";
 import { useForumNavigate } from "../hooks/useForumNavigate";
 
 import { useUserVotes } from "../state/UserVotes";
 import { useForum } from "../state/Forum";
+import { FORUM_ABI } from "../contracts";
 import { useWalletAuth } from "@/wallet";
 import SupportVoteControls from "./SupportVoteControls";
 import SimilarStatements from "./SimilarStatements";
 import {
   creditsToParts,
+  formatCountdown,
   supportCreditsToAllocatedCredits,
   supportCreditsToAllocatedParts,
 } from "../util";
@@ -73,10 +84,64 @@ const CreateStatementForm: FC = () => {
   const [hasHydratedDraft, setHasHydratedDraft] = useState(false);
   const hydratedDraftKeyRef = useRef<string | undefined>(undefined);
 
-  const { isUserVerified, stageStatement, setPendingDraftCost } =
+  const { isUserVerified, stageStatement, setPendingDraftCost, state } =
     useUserVotes();
   const { address } = useWalletAuth();
-  const { creditMultiplier, name: forumName, chainFingerprint } = useForum();
+  const {
+    creditMultiplier,
+    name: forumName,
+    chainFingerprint,
+    forumContractAddress,
+  } = useForum();
+
+  // Per-identity statement-creation allowance (token bucket enforced on-chain
+  // by `Forum.addStatement`). `available` is how many statements can be created
+  // right now; `nextRefillTimestamp` (unix seconds) is when the next one frees
+  // up, or 0 when the allowance is already full.
+  const { data: allowanceData } = useReadContract({
+    address: forumContractAddress,
+    abi: FORUM_ABI,
+    account: address,
+    functionName: "getStatementAllowance",
+    args: [],
+    query: {
+      enabled: Boolean(address && isUserVerified),
+    },
+  });
+  const statementsAvailable = allowanceData ? Number(allowanceData[0]) : null;
+  const nextRefillTimestamp = allowanceData ? Number(allowanceData[1]) : 0;
+
+  // Statements already staged for this batch have not yet consumed their
+  // on-chain token (that happens on commit), so they count against the
+  // remaining allowance and must not let the user stage past what the bucket
+  // will permit.
+  const stagedStatementCount = state?.staged?.stagedStatements.length ?? 0;
+  const remainingAllowance =
+    statementsAvailable === null
+      ? null
+      : Math.max(0, statementsAvailable - stagedStatementCount);
+
+  // Blocked either because the on-chain bucket is empty, or because the staged
+  // batch already consumes the entire current allowance.
+  const isOutOfStatements = remainingAllowance === 0;
+  const isRateLimitedOnChain = statementsAvailable === 0;
+
+  // Tick a live clock while the user is out of statements so the countdown
+  // stays current without a page refresh.
+  const [nowSeconds, setNowSeconds] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    if (!isOutOfStatements) return;
+    setNowSeconds(Date.now() / 1000);
+    const handle = window.setInterval(() => {
+      setNowSeconds(Date.now() / 1000);
+    }, 1000);
+    return () => window.clearInterval(handle);
+  }, [isOutOfStatements]);
+
+  const secondsUntilNextStatement = Math.max(
+    0,
+    nextRefillTimestamp - nowSeconds,
+  );
   const draftStorageKey = useMemo(() => {
     if (!chainFingerprint) return undefined;
 
@@ -151,6 +216,7 @@ const CreateStatementForm: FC = () => {
   }, [draftCreditCost, setPendingDraftCost]);
 
   const handleCreate = useCallback(() => {
+    if (isOutOfStatements) return;
     if (text.length > 0 && isUserVerified && stageStatement) {
       setPendingDraftCost(0);
       if (draftStorageKey) {
@@ -160,6 +226,7 @@ const CreateStatementForm: FC = () => {
       void navigate("/my-statements");
     }
   }, [
+    isOutOfStatements,
     draftStorageKey,
     text,
     initialSupport,
@@ -236,6 +303,33 @@ const CreateStatementForm: FC = () => {
         </Stack>
       </Card>
 
+      {/* ── Out-of-statements notice ────────────────────────────────── */}
+      {isOutOfStatements && (
+        <Alert severity="warning" sx={{ mt: 2, borderRadius: 2 }}>
+          {isRateLimitedOnChain ? (
+            <>
+              You&apos;ve used all your statements for now.{" "}
+              {secondsUntilNextStatement > 0 ? (
+                <>
+                  You can add another in{" "}
+                  <strong>{formatCountdown(secondsUntilNextStatement)}</strong>.
+                </>
+              ) : (
+                <>You can add another now — refreshing your allowance…</>
+              )}
+            </>
+          ) : (
+            <>
+              You&apos;ve already staged all{" "}
+              <strong>{statementsAvailable}</strong>{" "}
+              {statementsAvailable === 1 ? "statement" : "statements"} your
+              current allowance permits. Submit or remove a staged statement
+              before adding another.
+            </>
+          )}
+        </Alert>
+      )}
+
       {/* ── Action buttons ──────────────────────────────────────────── */}
       <Stack
         direction="row"
@@ -246,7 +340,7 @@ const CreateStatementForm: FC = () => {
         <Button onClick={handleCancel}>Cancel</Button>
         <Button
           variant="contained"
-          disabled={text.trim().length === 0}
+          disabled={text.trim().length === 0 || isOutOfStatements}
           onClick={handleCreate}
         >
           Create
