@@ -66,6 +66,8 @@ async function main() {
       config.creditMultiplier,
       config.refundPenaltyBps,
       config.decaySpeedupFactor,
+      config.statementBurstCapacity,
+      config.statementRefillIntervalSeconds,
     );
     const deployResult = await ignition.deploy(module);
     ({ registry, ...forums } = deployResult);
@@ -85,6 +87,8 @@ async function main() {
       config.creditMultiplier,
       config.refundPenaltyBps,
       config.decaySpeedupFactor,
+      config.statementBurstCapacity,
+      config.statementRefillIntervalSeconds,
     );
     const deployResult = await ignition.deploy(module);
     ({ registry, ...forums } = deployResult);
@@ -102,6 +106,8 @@ async function main() {
       config.creditMultiplier,
       config.refundPenaltyBps,
       config.decaySpeedupFactor,
+      config.statementBurstCapacity,
+      config.statementRefillIntervalSeconds,
     );
     const parametersPath = path.resolve(
       import.meta.dirname,

@@ -20,6 +20,8 @@ export function createForumDevModule(
   creditMultiplier: number,
   refundPenaltyBps: number,
   decaySpeedupFactor: number,
+  statementBurstCapacity: number,
+  statementRefillIntervalSeconds: number,
 ) {
   return buildModule("ForumDevRegistryModule", (m) => {
     const devZKRegistry = m.contract("DevSymvoliaRegistry");
@@ -39,6 +41,8 @@ export function createForumDevModule(
       creditMultiplier,
       refundPenaltyBps,
       decaySpeedupFactor,
+      statementBurstCapacity,
+      statementRefillIntervalSeconds,
     );
 
     return { registry: devZKRegistry, ...forums };

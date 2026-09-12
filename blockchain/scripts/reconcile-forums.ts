@@ -201,6 +201,10 @@ async function main() {
         creditMultiplier: BigInt(config.creditMultiplier),
         refundPenaltyBps: BigInt(config.refundPenaltyBps),
         decaySpeedupFactor: BigInt(config.decaySpeedupFactor),
+        statementBurstCapacity: BigInt(config.statementBurstCapacity),
+        statementRefillIntervalSeconds: BigInt(
+          config.statementRefillIntervalSeconds,
+        ),
       },
     ]);
 

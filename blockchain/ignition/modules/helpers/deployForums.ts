@@ -22,6 +22,8 @@ import type {
  * @param creditMultiplier            - Credit multiplier (e.g. 10^6 for microcredits).
  * @param refundPenaltyBps            - Refund penalty in basis points (e.g. 2000 = 20%).
  * @param decaySpeedupFactor          - Multiplier to accelerate decay for testing (1 = normal).
+ * @param statementBurstCapacity      - Max statements a user can create in a burst (token-bucket capacity).
+ * @param statementRefillIntervalSeconds - Seconds to regain one statement-creation token.
  * @returns A record mapping each forum name to its deployed Forum contract Future.
  */
 export function deployForums(
@@ -39,6 +41,8 @@ export function deployForums(
   creditMultiplier: number,
   refundPenaltyBps: number,
   decaySpeedupFactor: number,
+  statementBurstCapacity: number,
+  statementRefillIntervalSeconds: number,
 ): {
   forums: Record<string, NamedArtifactContractDeploymentFuture<"Forum">>;
 } {
@@ -62,6 +66,8 @@ export function deployForums(
             creditMultiplier,
             refundPenaltyBps,
             decaySpeedupFactor,
+            statementBurstCapacity,
+            statementRefillIntervalSeconds,
           },
         ],
         { id: `Forum_${forum}` },

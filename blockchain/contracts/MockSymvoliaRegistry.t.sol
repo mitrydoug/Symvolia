@@ -5,7 +5,11 @@ import {Test} from "forge-std/Test.sol";
 
 import {MockSymvoliaRegistry} from "./MockSymvoliaRegistry.sol";
 import {Registration} from "./ISymvoliaRegistry.sol";
-import {ProofVerificationParams, ProofVerificationData, ServiceConfig} from "./IZKPassportVerifier.sol";
+import {
+    ProofVerificationParams,
+    ProofVerificationData,
+    ServiceConfig
+} from "./IZKPassportVerifier.sol";
 
 contract MockSymvoliaRegistryTest is Test {
     string constant SCOPE = "my-scope";

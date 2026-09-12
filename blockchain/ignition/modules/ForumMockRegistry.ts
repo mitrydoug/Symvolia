@@ -33,12 +33,11 @@ export function createForumMockModule(
   creditMultiplier: number,
   refundPenaltyBps: number,
   decaySpeedupFactor: number,
+  statementBurstCapacity: number,
+  statementRefillIntervalSeconds: number,
 ) {
   return buildModule("ForumMockRegistryModule", (m) => {
-    const mockZKRegistry = m.contract("MockSymvoliaRegistry", [
-      scope,
-      devMode,
-    ]);
+    const mockZKRegistry = m.contract("MockSymvoliaRegistry", [scope, devMode]);
 
     const { forums } = deployForums(
       m,
@@ -55,6 +54,8 @@ export function createForumMockModule(
       creditMultiplier,
       refundPenaltyBps,
       decaySpeedupFactor,
+      statementBurstCapacity,
+      statementRefillIntervalSeconds,
     );
 
     return { registry: mockZKRegistry, ...forums };

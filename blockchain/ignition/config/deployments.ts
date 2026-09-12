@@ -20,6 +20,8 @@ type DevDeploymentConfig = {
   creditMultiplier: number;
   refundPenaltyBps: number;
   decaySpeedupFactor: number;
+  statementBurstCapacity: number;
+  statementRefillIntervalSeconds: number;
 };
 
 type MockDeploymentConfig = {
@@ -40,6 +42,8 @@ type MockDeploymentConfig = {
   creditMultiplier: number;
   refundPenaltyBps: number;
   decaySpeedupFactor: number;
+  statementBurstCapacity: number;
+  statementRefillIntervalSeconds: number;
 };
 
 type ProductionDeploymentConfig = {
@@ -56,6 +60,8 @@ type ProductionDeploymentConfig = {
   creditMultiplier: number;
   refundPenaltyBps: number;
   decaySpeedupFactor: number;
+  statementBurstCapacity: number;
+  statementRefillIntervalSeconds: number;
   parametersFile: string;
 };
 
@@ -83,6 +89,8 @@ const deploymentConfigs: Record<string, DeploymentConfig> = {
     creditMultiplier: CRED_MULT,
     refundPenaltyBps: 2000,
     decaySpeedupFactor: 2016,
+    statementBurstCapacity: 1000,
+    statementRefillIntervalSeconds: 60,
   },
 
   /** Local native Hardhat node with mock registry and larger stress-test limits. */
@@ -100,6 +108,8 @@ const deploymentConfigs: Record<string, DeploymentConfig> = {
     creditMultiplier: CRED_MULT,
     refundPenaltyBps: 2000,
     decaySpeedupFactor: 168,
+    statementBurstCapacity: 100000,
+    statementRefillIntervalSeconds: 60,
   },
 
   /** Local Base Sepolia fork using the same mocked-registry topology as Base Sepolia. */
@@ -117,6 +127,8 @@ const deploymentConfigs: Record<string, DeploymentConfig> = {
     creditMultiplier: CRED_MULT,
     refundPenaltyBps: 2000,
     decaySpeedupFactor: 2016,
+    statementBurstCapacity: 1000,
+    statementRefillIntervalSeconds: 60,
   },
 
   /** Base mainnet production deployment. */
@@ -134,6 +146,8 @@ const deploymentConfigs: Record<string, DeploymentConfig> = {
     creditMultiplier: CRED_MULT,
     refundPenaltyBps: 2000,
     decaySpeedupFactor: 1,
+    statementBurstCapacity: 5,
+    statementRefillIntervalSeconds: 14400,
     parametersFile: "base.json",
   },
 
@@ -160,6 +174,8 @@ const deploymentConfigs: Record<string, DeploymentConfig> = {
     creditMultiplier: CRED_MULT,
     refundPenaltyBps: 2000,
     decaySpeedupFactor: 1,
+    statementBurstCapacity: 5,
+    statementRefillIntervalSeconds: 14400,
   },
 
   /** Local native Hardhat node exercising the proof-parsing mock registry. */
@@ -179,6 +195,8 @@ const deploymentConfigs: Record<string, DeploymentConfig> = {
     creditMultiplier: CRED_MULT,
     refundPenaltyBps: 2000,
     decaySpeedupFactor: 2016,
+    statementBurstCapacity: 1000,
+    statementRefillIntervalSeconds: 60,
   },
 };
 

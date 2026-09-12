@@ -56,7 +56,9 @@ contract ForumTest is Test {
                 minAdjustmentIntervalSeconds: 12,
                 creditMultiplier: 1,
                 refundPenaltyBps: 0,
-                decaySpeedupFactor: 1
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: 1000,
+                statementRefillIntervalSeconds: 60
             })
         );
     }
@@ -314,7 +316,9 @@ contract ForumTest is Test {
                 minAdjustmentIntervalSeconds: 12,
                 creditMultiplier: 100,
                 refundPenaltyBps: 0,
-                decaySpeedupFactor: 1
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: 1000,
+                statementRefillIntervalSeconds: 60
             })
         );
 
@@ -827,7 +831,9 @@ contract ForumTest is Test {
                 minAdjustmentIntervalSeconds: 12,
                 creditMultiplier: 100,
                 refundPenaltyBps: 0,
-                decaySpeedupFactor: 1
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: 1000,
+                statementRefillIntervalSeconds: 60
             })
         );
 
@@ -839,7 +845,8 @@ contract ForumTest is Test {
         fractionalForum.adjustSupport(adjustments);
 
         int supportBefore = fractionalForum
-        .getStatementsById(_oneId(0))[0].support;
+            .getStatementsById(_oneId(0))[0]
+            .support;
         assertEq(
             supportBefore,
             100,
@@ -1854,7 +1861,9 @@ contract ForumRefundPenaltyTest is Test {
                 minAdjustmentIntervalSeconds: 12,
                 creditMultiplier: 1,
                 refundPenaltyBps: 2000,
-                decaySpeedupFactor: 1
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: 1000,
+                statementRefillIntervalSeconds: 60
             })
         );
     }
@@ -1996,6 +2005,173 @@ contract ForumRefundPenaltyTest is Test {
             finalBalance,
             balanceBefore + 44,
             "Full withdrawal should refund 44 after 20% penalty on 55"
+        );
+    }
+}
+
+/// @dev Exercises the per-user statement-creation token bucket with a small
+///      capacity so limits are hit within a test.
+contract ForumStatementRateLimitTest is Test {
+    uint constant MOCK_TEST_TIMESTAMP = 1767572100;
+    uint constant BURST_CAPACITY = 5;
+    uint constant REFILL_INTERVAL = 14400; // 4 hours
+
+    DevSymvoliaRegistry mockRegistry;
+    ForumHarness forum;
+
+    function setUp() public {
+        vm.warp(MOCK_TEST_TIMESTAMP);
+        mockRegistry = new DevSymvoliaRegistry();
+        forum = new ForumHarness(
+            mockRegistry,
+            "",
+            Forum.ForumConfig({
+                maxRankedStatements: 100,
+                creditAllowanceIntervalSeconds: 60,
+                engagementWindowSeconds: 60,
+                maxStatementLength: 120,
+                userCreditAllowancePerInterval: 25,
+                userStartingCredits: 1000,
+                minStatementSupportToRank: 2,
+                minAdjustmentIntervalSeconds: 12,
+                creditMultiplier: 1,
+                refundPenaltyBps: 0,
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: BURST_CAPACITY,
+                statementRefillIntervalSeconds: REFILL_INTERVAL
+            })
+        );
+    }
+
+    modifier registeredMember() {
+        mockRegistry.register("");
+        _;
+    }
+
+    function testEmptyStatementReverts() external registeredMember {
+        vm.expectRevert(Forum.EmptyStatement.selector);
+        forum.addStatement("", 0);
+    }
+
+    function testBurstUpToCapacitySucceeds() external registeredMember {
+        for (uint i = 0; i < BURST_CAPACITY; i++) {
+            forum.addStatement("statement", 0);
+        }
+        (uint available, uint nextRefill) = forum.getStatementAllowance();
+        assertEq(available, 0, "Bucket should be empty after a full burst");
+        assertEq(
+            nextRefill,
+            block.timestamp + REFILL_INTERVAL,
+            "Next refill should be one interval away"
+        );
+    }
+
+    function testExceedingCapacityReverts() external registeredMember {
+        for (uint i = 0; i < BURST_CAPACITY; i++) {
+            forum.addStatement("statement", 0);
+        }
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Forum.StatementRateLimited.selector,
+                block.timestamp + REFILL_INTERVAL
+            )
+        );
+        forum.addStatement("one too many", 0);
+    }
+
+    function testTokenRegainedAfterInterval() external registeredMember {
+        for (uint i = 0; i < BURST_CAPACITY; i++) {
+            forum.addStatement("statement", 0);
+        }
+
+        // After one refill interval, exactly one token is available again.
+        vm.warp(block.timestamp + REFILL_INTERVAL);
+        (uint available, ) = forum.getStatementAllowance();
+        assertEq(available, 1, "Exactly one token should be regained");
+
+        forum.addStatement("after refill", 0);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Forum.StatementRateLimited.selector,
+                block.timestamp + REFILL_INTERVAL
+            )
+        );
+        forum.addStatement("empty again", 0);
+    }
+
+    function testAllowanceCapsAtCapacityAfterLongIdle()
+        external
+        registeredMember
+    {
+        forum.addStatement("statement", 0);
+
+        // Idle far longer than capacity * interval; allowance must cap.
+        vm.warp(block.timestamp + REFILL_INTERVAL * 1000);
+        (uint available, uint nextRefill) = forum.getStatementAllowance();
+        assertEq(
+            available,
+            BURST_CAPACITY,
+            "Allowance should cap at burst capacity"
+        );
+        assertEq(nextRefill, 0, "A full bucket has no pending refill");
+    }
+
+    function testInitialAllowanceIsFullCapacity() external registeredMember {
+        (uint available, uint nextRefill) = forum.getStatementAllowance();
+        assertEq(
+            available,
+            BURST_CAPACITY,
+            "A fresh user starts with a full bucket"
+        );
+        assertEq(nextRefill, 0, "A full bucket has no pending refill");
+    }
+
+    function testSubIntervalRemainderIsCarried() external registeredMember {
+        for (uint i = 0; i < BURST_CAPACITY; i++) {
+            forum.addStatement("statement", 0);
+        }
+
+        // Advance 1.5 intervals: one token refills, half an interval carries.
+        vm.warp(block.timestamp + REFILL_INTERVAL + REFILL_INTERVAL / 2);
+        forum.addStatement("after partial refill", 0);
+
+        // Only half an interval more (total 2 intervals since the burst) is
+        // needed for the next token, proving the remainder was carried.
+        vm.warp(block.timestamp + REFILL_INTERVAL / 2);
+        (uint available, ) = forum.getStatementAllowance();
+        assertEq(
+            available,
+            1,
+            "Carried remainder should speed the next refill"
+        );
+    }
+
+    function testMulticallBurstBeyondCapacityRevertsAtomically()
+        external
+        registeredMember
+    {
+        bytes[] memory calls = new bytes[](BURST_CAPACITY + 1);
+        for (uint i = 0; i < calls.length; i++) {
+            calls[i] = abi.encodeCall(
+                Forum.addStatement,
+                ("statement", int(0))
+            );
+        }
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Forum.StatementRateLimited.selector,
+                block.timestamp + REFILL_INTERVAL
+            )
+        );
+        forum.multicall(calls);
+
+        // The whole batch reverted, so no statements were recorded.
+        assertEq(
+            forum.statementCount(),
+            0,
+            "Atomic revert should leave no statements"
         );
     }
 }

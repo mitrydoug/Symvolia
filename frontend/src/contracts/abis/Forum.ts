@@ -70,6 +70,16 @@ export default [
             "internalType": "uint256",
             "name": "decaySpeedupFactor",
             "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "statementBurstCapacity",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "statementRefillIntervalSeconds",
+            "type": "uint256"
           }
         ],
         "internalType": "struct Forum.ForumConfig",
@@ -100,6 +110,11 @@ export default [
       }
     ],
     "name": "DuplicateAdjustment",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "EmptyStatement",
     "type": "error"
   },
   {
@@ -169,6 +184,17 @@ export default [
       }
     ],
     "name": "StartOutOfBounds",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "retryAfterTimestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "StatementRateLimited",
     "type": "error"
   },
   {
@@ -498,6 +524,24 @@ export default [
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "getStatementAllowance",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "available",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "nextRefillTimestamp",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256[]",
@@ -723,6 +767,43 @@ export default [
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "statementBuckets",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "tokens",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "lastRefill",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "statementBurstCapacity",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "statementCount",
     "outputs": [
@@ -744,6 +825,19 @@ export default [
       }
     ],
     "name": "statementRankings",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "statementRefillIntervalSeconds",
     "outputs": [
       {
         "internalType": "uint256",

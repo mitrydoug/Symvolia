@@ -205,8 +205,9 @@ library MockZKPassportParser {
             if (proofType == PROOF_TYPE_BIND && payloadLen == BOUND_DATA_LEN) {
                 return
                     _parseBoundData(
-                        committedInputs[payloadStart:payloadStart +
-                            BOUND_DATA_LEN]
+                        committedInputs[
+                            payloadStart:payloadStart + BOUND_DATA_LEN
+                        ]
                     );
             }
 

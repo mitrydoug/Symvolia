@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import "./ISymvoliaRegistry.sol";
 import "./StringUtils.sol";
 import "./DecayUtils.sol";
+import "./TokenBucket.sol";
 import "@openzeppelin/contracts/utils/Multicall.sol";
 
 // All credit values are denominated in fractional parts (e.g. microcredits).
@@ -20,6 +21,8 @@ contract Forum is Multicall {
     error InsufficientCredits(uint available, int required);
     error TimestampOrderInvalid(uint fromTimestamp, uint toTimestamp);
     error DuplicateAdjustment(uint statementId);
+    error EmptyStatement();
+    error StatementRateLimited(uint retryAfterTimestamp);
 
     // Maximum length (in bytes) of a statement
     uint public immutable maxStatementLength;
@@ -43,6 +46,10 @@ contract Forum is Multicall {
     uint public immutable refundPenaltyBps;
     // Multiplier to speed up decay for testing (1 = normal, 2016 = 5-min half-life)
     uint public immutable decaySpeedupFactor;
+    // Maximum statements a user can create in a burst (token-bucket capacity)
+    uint public immutable statementBurstCapacity;
+    // Seconds to regain one statement-creation token
+    uint public immutable statementRefillIntervalSeconds;
 
     ASymvoliaRegistry public symvoliaRegistry;
 
@@ -58,6 +65,8 @@ contract Forum is Multicall {
         uint creditMultiplier;
         uint refundPenaltyBps;
         uint decaySpeedupFactor;
+        uint statementBurstCapacity;
+        uint statementRefillIntervalSeconds;
     }
 
     enum SupportAdjustmentType {
@@ -120,6 +129,10 @@ contract Forum is Multicall {
 
     mapping(bytes32 => UserBalance) public userCredits;
 
+    // Per-user statement-creation rate limiter (token bucket), keyed by the
+    // registered identity so it cannot be reset by switching linked addresses.
+    mapping(bytes32 => TokenBucket.Bucket) public statementBuckets;
+
     // Membership criteria
     string public nationality;
 
@@ -151,6 +164,8 @@ contract Forum is Multicall {
         decaySpeedupFactor = _config.decaySpeedupFactor > 0
             ? _config.decaySpeedupFactor
             : 1;
+        statementBurstCapacity = _config.statementBurstCapacity;
+        statementRefillIntervalSeconds = _config.statementRefillIntervalSeconds;
     }
 
     function _resolveStatement(
@@ -353,15 +368,19 @@ contract Forum is Multicall {
         string calldata _statementText,
         int _initialSupport
     ) external onlyMembers returns (uint) {
+        if (bytes(_statementText).length == 0) revert EmptyStatement();
         if (bytes(_statementText).length > maxStatementLength)
             revert StatementTooLong(
                 bytes(_statementText).length,
                 maxStatementLength
             );
 
-        // Ensure the statement is not empty
-        // check for duplicate statements if necessary
-        // may want to do some rate-limiting here
+        // Rate-limit statement creation per registered identity (token bucket).
+        // `onlyMembers` guarantees the caller is registered, and
+        // `getUserIdentifier` reverts otherwise.
+        bytes32 _userId = symvoliaRegistry.getUserIdentifier(msg.sender);
+        _consumeStatementToken(_userId);
+
         statements[statementCount] = StatementImpl({
             id: statementCount,
             text: _statementText,
@@ -376,9 +395,6 @@ contract Forum is Multicall {
         // addition (not only when initial support is set) so that
         // `userCredits[_userId].lastUpdated` always advances. Clients rely on
         // that timestamp to detect that on-chain state changed for this user.
-        // `onlyMembers` guarantees the caller is registered, and
-        // `getUserIdentifier` reverts otherwise.
-        bytes32 _userId = symvoliaRegistry.getUserIdentifier(msg.sender);
         UserBalance storage _userBalance = userCredits[_userId];
         _updateUserBalanceToBeCurrent(_userBalance);
 
@@ -403,6 +419,61 @@ contract Forum is Multicall {
         uint _id = statementCount;
         statementCount++;
         return _id;
+    }
+
+    /**
+     * @notice Spends one statement-creation token for `_userId`, reverting when
+     *         the user's token bucket is empty.
+     * @dev Brings the bucket current (refilling one token per
+     *      `statementRefillIntervalSeconds`, capped at `statementBurstCapacity`)
+     *      and persists the decremented state. See {TokenBucket}.
+     * @param _userId The registered identity spending the token.
+     */
+    function _consumeStatementToken(bytes32 _userId) private {
+        TokenBucket.Bucket storage _bucket = statementBuckets[_userId];
+        (uint _tokens, uint _lastRefill) = TokenBucket.refresh(
+            _bucket.tokens,
+            _bucket.lastRefill,
+            statementBurstCapacity,
+            statementRefillIntervalSeconds,
+            block.timestamp
+        );
+
+        if (_tokens == 0)
+            revert StatementRateLimited(
+                _lastRefill + statementRefillIntervalSeconds
+            );
+
+        _bucket.tokens = _tokens - 1;
+        _bucket.lastRefill = _lastRefill;
+    }
+
+    /**
+     * @notice The caller's current statement-creation allowance.
+     * @return available The number of statements the caller can create right
+     *         now (up to `statementBurstCapacity`).
+     * @return nextRefillTimestamp When the next token is regained, or 0 when the
+     *         bucket is already full.
+     */
+    function getStatementAllowance()
+        external
+        view
+        onlyMembers
+        returns (uint available, uint nextRefillTimestamp)
+    {
+        bytes32 _userId = symvoliaRegistry.getUserIdentifier(msg.sender);
+        TokenBucket.Bucket memory _bucket = statementBuckets[_userId];
+        (uint _tokens, uint _lastRefill) = TokenBucket.refresh(
+            _bucket.tokens,
+            _bucket.lastRefill,
+            statementBurstCapacity,
+            statementRefillIntervalSeconds,
+            block.timestamp
+        );
+        available = _tokens;
+        nextRefillTimestamp = _tokens >= statementBurstCapacity
+            ? 0
+            : _lastRefill + statementRefillIntervalSeconds;
     }
 
     function getUserBalance() external view onlyMembers returns (uint) {
