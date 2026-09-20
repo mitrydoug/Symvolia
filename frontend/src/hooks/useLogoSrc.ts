@@ -9,8 +9,8 @@ const useLogoSrc = (): string => {
   const { mode, systemMode } = useColorScheme();
   const resolvedMode = mode === "system" ? systemMode : mode;
   return resolvedMode === "dark"
-    ? "./symvolia-logo-dark.svg"
-    : "./symvolia-logo.svg";
+    ? "./confluence-logo-rounded-dark.svg"
+    : "./confluence-logo-rounded.svg";
 };
 
 export default useLogoSrc;

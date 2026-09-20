@@ -23,6 +23,7 @@ import GlobalErrorBoundary, {
 import Settings from "./components/Settings.tsx";
 import HowItWorks from "./components/HowItWorks.tsx";
 import Welcome from "./components/Welcome.tsx";
+import EditorialDashboard from "./components/EditorialDashboard.tsx";
 
 import { theme, THEME_MODE_STORAGE_KEY } from "./theme.ts";
 import {
@@ -30,23 +31,9 @@ import {
   getStoredForumSlug,
   slugToForum,
 } from "./state/Forum.tsx";
-import { hasSeenWelcome } from "./state/welcome.ts";
 import { LocalSearchProvider } from "./state/LocalSearch.tsx";
 import MobileComingSoon from "./components/MobileComingSoon.tsx";
 import useIsMobileVisitor from "./hooks/useIsMobileVisitor.ts";
-
-/**
- * Redirects bare `/` to the last-visited forum slug (from localStorage),
- * falling back to the "earth" (global) forum. First-time visitors are sent to
- * the full-page welcome screen instead.
- */
-const RootRedirect: FC = () => {
-  if (!hasSeenWelcome()) {
-    return <Navigate to="/welcome" replace />;
-  }
-  const slug = getStoredForumSlug();
-  return <Navigate to={`/${slug}`} replace />;
-};
 
 /**
  * Validates the `:forumSlug` param. If the slug is unrecognised, redirects
@@ -118,9 +105,8 @@ const router = createHashRouter([
     children: forumChildren,
   },
   {
-    /* Bare "/" redirects to the last-visited forum (localStorage) */
     path: "/",
-    Component: RootRedirect,
+    Component: EditorialDashboard,
     errorElement: <RouteErrorBoundary />,
   },
 ]);
