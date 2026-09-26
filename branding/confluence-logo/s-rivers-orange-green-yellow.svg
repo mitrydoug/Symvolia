@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-labelledby="title desc">
+  <title id="title">Symvolia — Orange and Green Parallel Rivers S Prototype</title>
+  <desc id="desc">An orange river and a green river flow in parallel through a complete S curve, entering from the right and exiting together in yellow on the left.</desc>
+
+  <defs>
+    <linearGradient id="orange-to-yellow" gradientUnits="userSpaceOnUse" x1="0" y1="55" x2="0" y2="245">
+      <stop offset="0" stop-color="#f47a24"/>
+      <stop offset="0.22" stop-color="#f39a22"/>
+      <stop offset="0.42" stop-color="#efbc24"/>
+      <stop offset="0.56" stop-color="#e8d52b"/>
+      <stop offset="1" stop-color="#e8d52b"/>
+    </linearGradient>
+    <linearGradient id="green-to-yellow" gradientUnits="userSpaceOnUse" x1="0" y1="55" x2="0" y2="245">
+      <stop offset="0" stop-color="#39a957"/>
+      <stop offset="0.22" stop-color="#6eb647"/>
+      <stop offset="0.42" stop-color="#acc638"/>
+      <stop offset="0.56" stop-color="#e8d52b"/>
+      <stop offset="1" stop-color="#e8d52b"/>
+    </linearGradient>
+
+    <path id="rounded-square" d="M 145,30 C 120,30 101,39 94,58 C 88,77 86,111 86,145 C 86,179 88,213 94,232 C 101,251 120,260 145,260 C 178,264 232,264 265,260 C 290,260 309,251 316,232 C 322,213 324,179 324,145 C 324,111 322,77 316,58 C 309,39 290,30 265,30 C 232,26 178,26 145,30 Z"/>
+    <clipPath id="badge-boundary">
+      <use href="#rounded-square"/>
+    </clipPath>
+  </defs>
+
+  <use href="#rounded-square" fill="#10283f"/>
+
+  <g clip-path="url(#badge-boundary)" fill="none" stroke-width="38" stroke-linecap="round" stroke-linejoin="round">
+    <path
+      d="M 339,72 C 285,30 170,32 122,72 C 78,109 101,151 174,169 C 249,187 282,211 254,238 C 220,270 128,263 70,218"
+      stroke="url(#orange-to-yellow)"
+    />
+    <path
+      d="M 339,96 C 285,55 190,53 148,84 C 113,110 131,136 192,151 C 274,171 317,207 282,246 C 241,291 128,286 67,244"
+      stroke="url(#green-to-yellow)"
+    />
+  </g>
+</svg>

@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300">
+  <title>Symvolia — River Confluence</title>
+   <desc>Two flowing rivers unite into one widening channel, symbolizing convergence, shared purpose, and Symvolia.</desc>
+
+   <defs>
+      <!-- Source colors fade into a common purple silhouette before the merge. -->
+      <linearGradient id="red-source" gradientUnits="userSpaceOnUse"
+                              x1="138" y1="35" x2="244" y2="190">
+         <stop offset="0" stop-color="#f0444f"/>
+         <stop offset="0.48" stop-color="#d94768" stop-opacity="0.9"/>
+         <stop offset="0.78" stop-color="#a34286" stop-opacity="0.45"/>
+         <stop offset="1" stop-color="#8b55c7" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="blue-source" gradientUnits="userSpaceOnUse"
+                              x1="322" y1="35" x2="254" y2="185">
+         <stop offset="0" stop-color="#2474e8"/>
+         <stop offset="0.48" stop-color="#3d64d2" stop-opacity="0.9"/>
+         <stop offset="0.78" stop-color="#5354b5" stop-opacity="0.45"/>
+         <stop offset="1" stop-color="#8b55c7" stop-opacity="0"/>
+      </linearGradient>
+      <clipPath id="circle-boundary">
+         <circle cx="205" cy="145" r="115"/>
+      </clipPath>
+
+            <path id="northeastern-river" d="M 312,32
+               L 328,32
+               C 321,64 301,83 277,102
+                     C 255,119 245,133 249,153
+                  C 252,167 258,175 266,185
+                  C 258,190 250,198 238,207
+                  C 230,195 225,175 224,154
+                     C 220,122 234,101 262,80
+               C 287,61 305,47 312,32
+             Z"/>
+
+            <!-- The two banks are exact 180-degree counterparts around (205,145). -->
+                        <path id="main-river" d="M 150,10
+                           C 150,55 136,94 152,116
+               C 162,129 176,136 191,143
+               C 219,154 246,164 266,185
+                           C 288,216 293,250 293,290
+                           L 248,290
+                C 248,251 252,222 238,207
+                C 222,191 201,182 175,171
+                C 155,161 137,150 127,134
+                C 108,105 119,49 126,10
+             Z"/>
+   </defs>
+
+   <!-- Circular field. -->
+  <circle cx="205" cy="145" r="115"
+               fill="#10283f"/>
+
+   <g clip-path="url(#circle-boundary)">
+      <!-- A shared base makes overlapping geometry seamless at the confluence. -->
+      <g fill="#8b55c7">
+         <use href="#northeastern-river"/>
+         <use href="#main-river"/>
+      </g>
+
+      <!-- Color remains concentrated at each source and disappears before merging. -->
+      <use href="#main-river" fill="url(#red-source)"/>
+      <use href="#northeastern-river" fill="url(#blue-source)"/>
+  </g>
+
+   <!-- Drawn last so the clipped river ends sit cleanly beneath the boundary. -->
+   <circle cx="205" cy="145" r="115"
+               fill="none" stroke="#7892aa" stroke-width="2.5"/>
+</svg>

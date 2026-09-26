@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300">
+  <title>Symvolia — River Confluence</title>
+  <desc>Two flowing rivers unite into one widening channel, symbolizing convergence, shared purpose, and Symvolia.</desc>
+
+  <defs>
+    <!-- Source colors fade into a common purple silhouette before the merge. -->
+    <linearGradient id="red-source" gradientUnits="userSpaceOnUse"
+                    x1="138" y1="35" x2="244" y2="190">
+      <stop offset="0" stop-color="#e14b4b"/>
+      <stop offset="0.48" stop-color="#d04765" stop-opacity="0.9"/>
+      <stop offset="0.78" stop-color="#a34286" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#663a9f" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="blue-source" gradientUnits="userSpaceOnUse"
+                    x1="322" y1="35" x2="254" y2="185">
+      <stop offset="0" stop-color="#2878d0"/>
+      <stop offset="0.48" stop-color="#3c6bc9" stop-opacity="0.9"/>
+      <stop offset="0.78" stop-color="#5354b5" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#663a9f" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="circle-boundary">
+      <circle cx="205" cy="145" r="115"/>
+    </clipPath>
+
+    <path id="northeastern-river" d="M 315,35
+      L 325,35
+      C 318,62 299,80 274,99
+      C 250,117 239,131 243,153
+      C 246,169 252,181 260,188
+      L 247,199
+      C 237,186 232,171 230,154
+      C 226,125 239,106 265,86
+      C 290,67 308,52 315,35
+      Z"/>
+
+    <path id="main-river" d="M 145,35
+      C 130,62 130,95 147,119
+      C 157,133 172,141 188,148
+      C 215,158 241,167 260,188
+      C 286,215 298,246 294,280
+      C 282,263 278,246 271,230
+      C 265,218 253,212 244,203
+      C 226,185 204,176 178,165
+      C 160,154 143,144 133,130
+      C 116,104 116,69 135,35
+      Z"/>
+  </defs>
+
+  <!-- Circular field. -->
+  <circle cx="205" cy="145" r="115" fill="#f2f1ee"/>
+
+  <g clip-path="url(#circle-boundary)">
+    <!-- A shared base makes overlapping geometry seamless at the confluence. -->
+    <g fill="#663a9f">
+      <use href="#northeastern-river"/>
+      <use href="#main-river"/>
+    </g>
+
+    <!-- Color remains concentrated at each source and disappears before merging. -->
+    <use href="#main-river" fill="url(#red-source)"/>
+    <use href="#northeastern-river" fill="url(#blue-source)"/>
+  </g>
+
+  <!-- Drawn last so the clipped river ends sit cleanly beneath the boundary. -->
+  <circle cx="205" cy="145" r="115"
+          fill="none" stroke="#26364a" stroke-width="1.25"/>
+</svg>

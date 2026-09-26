@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-labelledby="title desc">
+  <title id="title">Symvolia — Blocky Y Confluence</title>
+  <desc id="desc">Angular red and blue branches converge into a shared purple vertical tail within a rounded navy badge.</desc>
+
+  <defs>
+    <linearGradient id="red-to-purple" gradientUnits="userSpaceOnUse" x1="112" y1="45" x2="205" y2="157">
+      <stop offset="0" stop-color="#f0444f"/>
+      <stop offset="0.45" stop-color="#d94768"/>
+      <stop offset="0.78" stop-color="#aa488d"/>
+      <stop offset="1" stop-color="#8b55c7"/>
+    </linearGradient>
+    <linearGradient id="blue-to-purple" gradientUnits="userSpaceOnUse" x1="298" y1="45" x2="205" y2="157">
+      <stop offset="0" stop-color="#2474e8"/>
+      <stop offset="0.45" stop-color="#3d64d2"/>
+      <stop offset="0.78" stop-color="#6359c9"/>
+      <stop offset="1" stop-color="#8b55c7"/>
+    </linearGradient>
+    <linearGradient id="purple-tail" gradientUnits="userSpaceOnUse" x1="0" y1="145" x2="0" y2="270">
+      <stop offset="0" stop-color="#8b55c7"/>
+      <stop offset="1" stop-color="#7042ad"/>
+    </linearGradient>
+
+    <path id="rounded-square" d="M 145,30 C 120,30 101,39 94,58 C 88,77 86,111 86,145 C 86,179 88,213 94,232 C 101,251 120,260 145,260 C 178,264 232,264 265,260 C 290,260 309,251 316,232 C 322,213 324,179 324,145 C 324,111 322,77 316,58 C 309,39 290,30 265,30 C 232,26 178,26 145,30 Z"/>
+    <clipPath id="badge-boundary">
+      <use href="#rounded-square"/>
+    </clipPath>
+  </defs>
+
+  <use href="#rounded-square" fill="#10283f"/>
+
+  <g clip-path="url(#badge-boundary)">
+    <!-- Broad, straight-edged branches form a geometric Y. -->
+    <path
+      d="M 92,30 L 137,30 L 205,126 L 205,178 L 178,166 L 104,62 Z"
+      fill="url(#red-to-purple)"
+    />
+    <path
+      d="M 273,30 L 318,30 L 306,62 L 232,166 L 205,178 L 205,126 Z"
+      fill="url(#blue-to-purple)"
+    />
+
+    <!-- The shared stem overlaps the junction for a seamless purple tail. -->
+    <path
+      d="M 205,126 L 232,150 L 232,276 L 178,276 L 178,150 Z"
+      fill="url(#purple-tail)"
+    />
+  </g>
+</svg>
