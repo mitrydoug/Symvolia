@@ -22,6 +22,11 @@ type CommitConfirmationDialogProps = {
   open: boolean;
   statementCount: number;
   supportAdjustmentCount: number;
+  /**
+   * When set, the staged batch exceeds the user's on-chain statement allowance
+   * and would revert on submit. Shown as a warning and blocks confirmation.
+   */
+  allowanceWarning?: string | null;
   networkFee: SponsoredNetworkFeeEstimate | null;
   isNetworkFeeLoading: boolean;
   networkFeeError?: string;
@@ -33,6 +38,7 @@ const CommitConfirmationDialog = ({
   open,
   statementCount,
   supportAdjustmentCount,
+  allowanceWarning,
   networkFee,
   isNetworkFeeLoading,
   networkFeeError,
@@ -55,6 +61,7 @@ const CommitConfirmationDialog = ({
   // explicit fee acknowledgement before confirming.
   const requiresFeeAcknowledgement = networkFee?.kind === "self-funded";
   const canConfirm =
+    !allowanceWarning &&
     !isNetworkFeeLoading &&
     !networkFeeError &&
     networkFee !== null &&
@@ -96,6 +103,11 @@ const CommitConfirmationDialog = ({
       </DialogTitle>
       <DialogContent sx={{ pt: 0 }}>
         <Stack spacing={2}>
+          {allowanceWarning && (
+            <Alert severity="warning" sx={{ borderRadius: 2 }}>
+              {allowanceWarning}
+            </Alert>
+          )}
           <Typography variant="body2" sx={{ fontWeight: 700 }}>
             Details
           </Typography>
