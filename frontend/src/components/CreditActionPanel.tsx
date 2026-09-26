@@ -84,13 +84,13 @@ const CreditActionPanel: React.FC = () => {
     : false;
   const commitBusy = isUserVerified
     ? userVotes.state?.commitStatus !== undefined &&
-    userVotes.state?.commitStatus !== "idle"
+      userVotes.state?.commitStatus !== "idle"
     : false;
-  const commitChanges = isUserVerified ? userVotes.commitChanges : () => { };
+  const commitChanges = isUserVerified ? userVotes.commitChanges : () => {};
   const previewCommitChanges = isUserVerified
     ? userVotes.previewCommitChanges
     : undefined;
-  const resetChanges = isUserVerified ? userVotes.resetChanges : () => { };
+  const resetChanges = isUserVerified ? userVotes.resetChanges : () => {};
   const hasEnoughCredits = isUserVerified
     ? (userVotes.state?.hasEnoughCredits ?? true)
     : true;
@@ -112,8 +112,9 @@ const CreditActionPanel: React.FC = () => {
   } = useStatementAllowance();
   const overStagedWarning =
     isOverStaged && availableStatements !== null
-      ? `You've staged ${stagedStatementCount} ${stagedStatementCount === 1 ? "statement" : "statements"
-      } with only ${availableStatements} available. Remove ${overStagedBy} to be able to submit.`
+      ? `You've staged ${stagedStatementCount} ${
+          stagedStatementCount === 1 ? "statement" : "statements"
+        } with only ${availableStatements} available. Remove ${overStagedBy} to be able to submit.`
       : null;
 
   const isOverBudget = credits !== null && credits < 0;
@@ -314,8 +315,8 @@ const CreditActionPanel: React.FC = () => {
                           fontVariantNumeric: "tabular-nums",
                           ...(hasStagedChanges && !commitBusy
                             ? {
-                              animation: `${shimmer} 1.5s ease-in-out infinite`,
-                            }
+                                animation: `${shimmer} 1.5s ease-in-out infinite`,
+                              }
                             : {}),
                         }}
                       >
