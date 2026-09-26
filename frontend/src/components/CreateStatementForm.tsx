@@ -1,4 +1,12 @@
-import { FC, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FC,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Alert,
   Box,
@@ -8,12 +16,11 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import { useReadContract } from "wagmi";
 import { useForumNavigate } from "../hooks/useForumNavigate";
 
 import { useUserVotes } from "../state/UserVotes";
 import { useForum } from "../state/Forum";
-import { FORUM_ABI } from "../contracts";
+import useStatementAllowance from "../hooks/useStatementAllowance";
 import { useWalletAuth } from "@/wallet";
 import SupportVoteControls from "./SupportVoteControls";
 import SimilarStatements from "./SimilarStatements";
@@ -84,47 +91,24 @@ const CreateStatementForm: FC = () => {
   const [hasHydratedDraft, setHasHydratedDraft] = useState(false);
   const hydratedDraftKeyRef = useRef<string | undefined>(undefined);
 
-  const { isUserVerified, stageStatement, setPendingDraftCost, state } =
+  const { isUserVerified, stageStatement, setPendingDraftCost } =
     useUserVotes();
   const { address } = useWalletAuth();
-  const {
-    creditMultiplier,
-    name: forumName,
-    chainFingerprint,
-    forumContractAddress,
-  } = useForum();
+  const { creditMultiplier, name: forumName, chainFingerprint } = useForum();
 
   // Per-identity statement-creation allowance (token bucket enforced on-chain
-  // by `Forum.addStatement`). `available` is how many statements can be created
-  // right now; `nextRefillTimestamp` (unix seconds) is when the next one frees
-  // up, or 0 when the allowance is already full.
-  const { data: allowanceData } = useReadContract({
-    address: forumContractAddress,
-    abi: FORUM_ABI,
-    account: address,
-    functionName: "getStatementAllowance",
-    args: [],
-    query: {
-      enabled: Boolean(address && isUserVerified),
-    },
-  });
-  const statementsAvailable = allowanceData ? Number(allowanceData[0]) : null;
-  const nextRefillTimestamp = allowanceData ? Number(allowanceData[1]) : 0;
-
-  // Statements already staged for this batch have not yet consumed their
-  // on-chain token (that happens on commit), so they count against the
-  // remaining allowance and must not let the user stage past what the bucket
-  // will permit.
-  const stagedStatementCount = state?.staged?.stagedStatements.length ?? 0;
-  const remainingAllowance =
-    statementsAvailable === null
-      ? null
-      : Math.max(0, statementsAvailable - stagedStatementCount);
+  // by `Forum.addStatement`), reconciled against statements already staged in
+  // this batch. See `useStatementAllowance` for field semantics.
+  const {
+    available: statementsAvailable,
+    nextRefillTimestamp,
+    staged: stagedStatementCount,
+    remaining: remainingAllowance,
+  } = useStatementAllowance();
 
   // Blocked either because the on-chain bucket is empty, or because the staged
   // batch already consumes the entire current allowance.
   const isOutOfStatements = remainingAllowance === 0;
-  const isRateLimitedOnChain = statementsAvailable === 0;
 
   // Tick a live clock while the user is out of statements so the countdown
   // stays current without a page refresh.
@@ -142,6 +126,93 @@ const CreateStatementForm: FC = () => {
     0,
     nextRefillTimestamp - nowSeconds,
   );
+
+  // Allowance notice shown on the write page. The over-staged case (more staged
+  // than currently available) is deliberately kept to a concise nudge here; the
+  // detailed "remove N to submit" remediation lives on the submit dialog and
+  // credits panel instead.
+  const allowanceNotice: {
+    severity: "info" | "warning";
+    content: ReactNode;
+  } | null =
+    statementsAvailable === null
+      ? null
+      : (() => {
+          const available = statementsAvailable;
+          const staged = stagedStatementCount;
+
+          if (staged === 0) {
+            return available === 0
+              ? {
+                  severity: "warning" as const,
+                  content: (
+                    <>
+                      You&apos;ve used all your statements for now.{" "}
+                      {secondsUntilNextStatement > 0 ? (
+                        <>
+                          You can add another in{" "}
+                          <strong>
+                            {formatCountdown(secondsUntilNextStatement)}
+                          </strong>
+                          .
+                        </>
+                      ) : (
+                        <>
+                          You can add another now — refreshing your allowance…
+                        </>
+                      )}
+                    </>
+                  ),
+                }
+              : {
+                  severity: "info" as const,
+                  content: (
+                    <>
+                      You can create up to <strong>{available}</strong>{" "}
+                      {available === 1 ? "statement" : "statements"} at this
+                      time.
+                    </>
+                  ),
+                };
+          }
+
+          if (staged < available) {
+            return {
+              severity: "info" as const,
+              content: (
+                <>
+                  You&apos;ve staged <strong>{staged}</strong> of{" "}
+                  <strong>{available}</strong> available statements.
+                </>
+              ),
+            };
+          }
+
+          if (staged === available) {
+            return {
+              severity: "warning" as const,
+              content: (
+                <>
+                  You&apos;ve staged <strong>{available}</strong> of{" "}
+                  <strong>{available}</strong> available statements. Submit or
+                  remove a staged statement.
+                </>
+              ),
+            };
+          }
+
+          return {
+            severity: "warning" as const,
+            content: (
+              <>
+                You&apos;ve staged more statements than your allowance currently
+                permits. Submit or remove a staged statement before adding
+                another.
+              </>
+            ),
+          };
+        })();
+
   const draftStorageKey = useMemo(() => {
     if (!chainFingerprint) return undefined;
 
@@ -303,32 +374,23 @@ const CreateStatementForm: FC = () => {
         </Stack>
       </Card>
 
-      {/* ── Out-of-statements notice ────────────────────────────────── */}
-      {isOutOfStatements && (
-        <Alert severity="warning" sx={{ mt: 2, borderRadius: 2 }}>
-          {isRateLimitedOnChain ? (
-            <>
-              You&apos;ve used all your statements for now.{" "}
-              {secondsUntilNextStatement > 0 ? (
-                <>
-                  You can add another in{" "}
-                  <strong>{formatCountdown(secondsUntilNextStatement)}</strong>.
-                </>
-              ) : (
-                <>You can add another now — refreshing your allowance…</>
-              )}
-            </>
-          ) : (
-            <>
-              You&apos;ve already staged all{" "}
-              <strong>{statementsAvailable}</strong>{" "}
-              {statementsAvailable === 1 ? "statement" : "statements"} your
-              current allowance permits. Submit or remove a staged statement
-              before adding another.
-            </>
-          )}
-        </Alert>
-      )}
+      {/* ── Allowance notice ────────────────────────────────────────── */}
+      {allowanceNotice &&
+        (allowanceNotice.severity === "warning" ? (
+          <Alert severity="warning" sx={{ mt: 2, borderRadius: 2 }}>
+            {allowanceNotice.content}
+          </Alert>
+        ) : (
+          // When statements are still available, keep it low-key: subtle helper
+          // text rather than a full alert.
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ mt: 1.5, px: 0.5 }}
+          >
+            {allowanceNotice.content}
+          </Typography>
+        ))}
 
       {/* ── Action buttons ──────────────────────────────────────────── */}
       <Stack

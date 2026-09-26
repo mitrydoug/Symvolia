@@ -17,6 +17,7 @@ import {
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import ClearRoundedIcon from "@mui/icons-material/ClearRounded";
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import { useNavigate } from "react-router-dom";
 import { useUserVotes } from "../state/UserVotes";
 import { useForum } from "../state/Forum";
@@ -24,6 +25,7 @@ import { FORUMS } from "./ChooseForumModal";
 import { useUserRegistration } from "@/hooks/useUserRegistration";
 import { toDemonym } from "../countryCodeMap";
 import { useCreditConversion } from "../hooks/useCreditConversion";
+import useStatementAllowance from "../hooks/useStatementAllowance";
 import AnimatedCounter from "./AnimatedCounter";
 import { useWalletAuth } from "@/wallet";
 import CommitConfirmationDialog from "./CommitConfirmationDialog";
@@ -99,6 +101,21 @@ const CreditActionPanel: React.FC = () => {
   const stagedSupportCount = isUserVerified
     ? (userVotes.state?.staged?.supportAdjustments.size ?? 0)
     : 0;
+
+  // Statement-creation allowance vs. what's staged. When the user has staged
+  // more statements than the on-chain bucket currently permits, the batch would
+  // revert on submit, so surface a warning here and on the submit dialog.
+  const {
+    available: availableStatements,
+    isOverStaged,
+    overStagedBy,
+  } = useStatementAllowance();
+  const overStagedWarning =
+    isOverStaged && availableStatements !== null
+      ? `You've staged ${stagedStatementCount} ${
+          stagedStatementCount === 1 ? "statement" : "statements"
+        } with only ${availableStatements} available. Remove ${overStagedBy} to be able to submit.`
+      : null;
 
   const isOverBudget = credits !== null && credits < 0;
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
@@ -263,6 +280,15 @@ const CreditActionPanel: React.FC = () => {
                     flexShrink: 0,
                   }}
                 >
+                  {overStagedWarning && (
+                    <Tooltip title={overStagedWarning}>
+                      <WarningAmberRoundedIcon
+                        fontSize="small"
+                        sx={{ color: "warning.main", cursor: "help" }}
+                        aria-label={overStagedWarning}
+                      />
+                    </Tooltip>
+                  )}
                   <Tooltip
                     title={
                       !hasEnoughCredits
@@ -349,6 +375,7 @@ const CreditActionPanel: React.FC = () => {
         open={commitDialogOpen}
         statementCount={stagedStatementCount}
         supportAdjustmentCount={stagedSupportCount}
+        allowanceWarning={overStagedWarning}
         networkFee={commitPreview?.networkFee ?? null}
         isNetworkFeeLoading={commitPreviewLoading}
         networkFeeError={commitPreviewError}
