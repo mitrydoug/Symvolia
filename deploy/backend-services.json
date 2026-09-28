@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "_comment": "Non-secret, per-network operational settings for the DEPLOYED Symvolia backend service. This is the committed source of truth consumed by scripts/lib/backend-config.mjs (CI Railway variable sync) and scripts/generate-backend-env-examples.mjs. Secrets (RPC URLs with keys, Meilisearch key) NEVER live here - CI injects those from GitHub secrets. Contract addresses live in deployments/<network>.json; this file only holds host/policy settings that are not derivable from the contract deployment.",
+  "services": {
+    "base_sepolia": {
+      "railwayService": "symvolia-backend",
+      "corsOrigins": "*",
+      "gasSponsorshipInspectApprove": true
+    }
+  }
+}
