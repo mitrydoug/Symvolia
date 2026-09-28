@@ -1,122 +1,17 @@
 #!/usr/bin/env node
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
+import {
+  backendServiceConfig,
+  deploymentsDir,
+  loadDeployment,
+  profileIndexerEnabled,
+  registrySponsorshipSignatures,
+  repoRoot,
+} from "./lib/backend-config.mjs";
 
-const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = process.env.REPO_ROOT
-  ? path.resolve(process.env.REPO_ROOT)
-  : path.resolve(scriptDir, "..");
-const deploymentsDir = path.join(repoRoot, "deployments");
-const profilesDir = path.join(repoRoot, "env/profiles");
 const outputDir = path.join(repoRoot, "deploy/env");
-
-const ENV_FLAG_TRUTHY = new Set(["1", "true", "yes", "on"]);
-
-// Resolve INDEXER_ENABLED from the deployment's profile env file
-// (env/profiles/<deploymentProfile>.env), which is the source of truth for
-// operational toggles. Mirrors the backend's env_flag semantics: unset or
-// empty means enabled (the default); any other value is truthy only when it is
-// one of 1/true/yes/on.
-const profileIndexerEnabled = (deploymentProfile) => {
-  const profilePath = path.join(profilesDir, `${deploymentProfile}.env`);
-  let contents;
-  try {
-    contents = readFileSync(profilePath, "utf8");
-  } catch {
-    return true;
-  }
-
-  let rawValue;
-  for (const line of contents.split(/\r?\n/)) {
-    const match = /^\s*INDEXER_ENABLED\s*=\s*(.*)$/.exec(line);
-    if (match) {
-      rawValue = match[1];
-    }
-  }
-
-  if (rawValue === undefined) {
-    return true;
-  }
-
-  const normalized = rawValue
-    .trim()
-    .replace(/^["']|["']$/g, "")
-    .trim()
-    .toLowerCase();
-  if (normalized === "") {
-    return true;
-  }
-  return ENV_FLAG_TRUTHY.has(normalized);
-};
-
-const fail = (deploymentPath, message) => {
-  console.error(`${deploymentPath}: ${message}`);
-  process.exit(1);
-};
-
-const loadDeployment = (networkName) => {
-  const deploymentPath = path.join(deploymentsDir, `${networkName}.json`);
-  let deployment;
-  try {
-    deployment = JSON.parse(readFileSync(deploymentPath, "utf8"));
-  } catch (error) {
-    fail(deploymentPath, "missing or invalid deployment JSON");
-  }
-
-  if (deployment.schemaVersion !== 1) {
-    fail(deploymentPath, `unsupported schemaVersion ${deployment.schemaVersion}`);
-  }
-  if (deployment.network !== networkName) {
-    fail(
-      deploymentPath,
-      `network field "${deployment.network}" does not match filename "${networkName}"`,
-    );
-  }
-  if (typeof deployment.deployNetwork !== "string" || deployment.deployNetwork.length === 0) {
-    fail(deploymentPath, "deployNetwork must be set");
-  }
-  if (typeof deployment.deploymentProfile !== "string" || deployment.deploymentProfile.length === 0) {
-    fail(deploymentPath, "deploymentProfile must be set");
-  }
-  if (!ADDRESS_PATTERN.test(deployment.registryAddress)) {
-    fail(deploymentPath, "registryAddress must be a 20-byte hex address");
-  }
-  if (
-    typeof deployment.deploymentBlockNumber !== "number" ||
-    !Number.isSafeInteger(deployment.deploymentBlockNumber) ||
-    deployment.deploymentBlockNumber < 0
-  ) {
-    fail(deploymentPath, "deploymentBlockNumber must be a non-negative safe integer");
-  }
-  if (!deployment.forums || typeof deployment.forums !== "object" || Array.isArray(deployment.forums)) {
-    fail(deploymentPath, "forums must be an object mapping forum names to addresses");
-  }
-
-  const forumOrder = Array.isArray(deployment.forumOrder)
-    ? deployment.forumOrder
-    : Object.keys(deployment.forums);
-  if (forumOrder.length === 0) {
-    fail(deploymentPath, "forumOrder must contain at least one forum");
-  }
-  for (const forumName of forumOrder) {
-    const address = deployment.forums[forumName];
-    if (!ADDRESS_PATTERN.test(address)) {
-      fail(deploymentPath, `forums.${forumName} must be a 20-byte hex address`);
-    }
-  }
-
-  return { deployment, forumOrder };
-};
-
-const registrySponsorshipSignatures = (registryMode) =>
-  registryMode === "dev"
-    ? ["register(string)"]
-    : [
-      "register((bytes32,(bytes32,bytes,bytes32[]),bytes,(uint256,string,string,bool)))",
-    ];
 
 const backendEnvText = (networkName, deployment, forumOrder) => {
   const registryMode = deployment.registryMode ?? "production";
@@ -124,6 +19,15 @@ const backendEnvText = (networkName, deployment, forumOrder) => {
   const orderedForumAddresses = forumOrder.map((forumName) => deployment.forums[forumName]);
   const relayAllowedContracts = [...orderedForumAddresses, deployment.registryAddress];
   const signatures = registrySponsorshipSignatures(registryMode);
+
+  // Non-secret service settings from the committed backend-services config.
+  // Fall back to placeholders when a network has no entry yet.
+  const service = backendServiceConfig(networkName) ?? {};
+  const corsOrigins =
+    typeof service.corsOrigins === "string" && service.corsOrigins.length > 0
+      ? service.corsOrigins
+      : "https://replace-with-your-frontend-origin";
+  const inspectApprove = service.gasSponsorshipInspectApprove === true ? "true" : "false";
 
   // INDEXER_ENABLED defaults to true in the backend, so only emit it when the
   // profile opts out (the non-default case worth calling out explicitly).
@@ -139,7 +43,7 @@ INDEXER_ENABLED=false
     registryMode === "production"
       ? `# Required in production registry mode: the verifier is eth_call'd to recover
 # a registration's zkPassport id (verify() is simulated, not executed).
-ZKPASSPORT_VERIFIER_ADDRESS=0xREPLACE_WITH_ZKPASSPORT_VERIFIER_ADDRESS`
+ZKPASSPORT_VERIFIER_ADDRESS=${service.zkPassportVerifierAddress ?? "0xREPLACE_WITH_ZKPASSPORT_VERIFIER_ADDRESS"}`
       : `# ZKPASSPORT_VERIFIER_ADDRESS is only needed in production registry mode;
 # ${registryMode} registrations are metered without an RPC verify() call.`;
 
@@ -181,9 +85,9 @@ RPC_RELAY_UPSTREAM_TIMEOUT_SECONDS=15
 RPC_RELAY_GETLOGS_WINDOW_BLOCKS=1000
 
 # Gas sponsorship webhook (Alchemy Gas Manager)
-# Approve inspection requests from the Gas Manager webhook policy. Off by default
-# so a misconfigured service fails closed (users self-fund instead).
-ALCHEMY_GAS_SPONSORSHIP_INSPECT_APPROVE=false
+# Approve inspection requests from the Gas Manager webhook policy. Sourced from
+# deploy/backend-services.json; off fails closed (users self-fund instead).
+ALCHEMY_GAS_SPONSORSHIP_INSPECT_APPROVE=${inspectApprove}
 # Off-chain per-human leaky-bucket rate limiter for gas-sponsored actions.
 # Set GAS_SPONSORSHIP_RATE_LIMIT_DB to a path on a persistent Railway Volume to
 # enable metering; leave it unset to sponsor purely by function selector.
@@ -203,8 +107,8 @@ ${verifierLines}
 MEILI_URL=http://meilisearch.railway.internal:7700
 MEILI_API_KEY=replace-with-meili-master-key
 
-# Browser/API access
-CORS_ORIGINS=https://replace-with-your-frontend-origin
+# Browser/API access (from deploy/backend-services.json)
+CORS_ORIGINS=${corsOrigins}
 
 # Optional semantic similarity search. Start with false for first deploys;
 # enable once Meilisearch is healthy and backed by persistent storage.
@@ -237,11 +141,16 @@ const networkNames = readdirSync(deploymentsDir)
   .filter((networkName) => networkName !== "localhost")
   .sort();
 
-for (const networkName of networkNames) {
-  const { deployment, forumOrder } = loadDeployment(networkName);
-  const outputPath = path.join(outputDir, `${networkName}.backend.env.example`);
-  writeFileSync(outputPath, backendEnvText(networkName, deployment, forumOrder));
-  console.log(`Wrote ${outputPath}`);
+try {
+  for (const networkName of networkNames) {
+    const { deployment, forumOrder } = loadDeployment(networkName);
+    const outputPath = path.join(outputDir, `${networkName}.backend.env.example`);
+    writeFileSync(outputPath, backendEnvText(networkName, deployment, forumOrder));
+    console.log(`Wrote ${outputPath}`);
+  }
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
 }
 
 const meilisearchOutputPath = path.join(outputDir, "railway-meilisearch.env.example");

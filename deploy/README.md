@@ -38,11 +38,16 @@ The same derived version is injected into the frontend build as
 
 Required GitHub repository configuration:
 
-| Name                        | Type     | Purpose                                                     |
-| --------------------------- | -------- | ----------------------------------------------------------- |
-| `RAILWAY_DEVELOPMENT_TOKEN` | Secret   | Railway project token scoped to the development environment |
-| `RAILWAY_PRODUCTION_TOKEN`  | Secret   | Railway project token scoped to the production environment  |
-| `RAILWAY_BACKEND_SERVICE`   | Variable | Backend service name or ID, for example `symvolia-backend`  |
+| Name                        | Type   | Purpose                                                     |
+| --------------------------- | ------ | ----------------------------------------------------------- |
+| `RAILWAY_DEVELOPMENT_TOKEN` | Secret | Railway project token scoped to the development environment |
+| `RAILWAY_PRODUCTION_TOKEN`  | Secret | Railway project token scoped to the production environment  |
+
+The backend RPC/Meilisearch secrets are set per environment (see
+`.github/workflows/deploy-backend-railway.yaml`). All non-secret service
+settings — the Railway service name, CORS origins, gas-sponsorship approval, and
+the zkPassport verifier address — live in committed source
+(`deploy/backend-services.json`), so no GitHub *variables* are required.
 
 The GHCR publish workflow uses `GITHUB_TOKEN`; no Docker Hub or GHCR personal
 access token is required. After the first successful publish, make the GHCR
