@@ -5,6 +5,7 @@ import { createForumProductionModule } from "../ignition/modules/ForumProduction
 import { createForumDevModule } from "../ignition/modules/ForumDevRegistry.js";
 import { createForumMockModule } from "../ignition/modules/ForumMockRegistry.js";
 import {
+  assertRegistryModeAllowedOnChain,
   getDeploymentConfig,
   requireDeploymentProfile,
 } from "../ignition/config/deployments.js";
@@ -29,6 +30,14 @@ async function main() {
     process.env.DEPLOYMENT_PROFILE,
   );
   const config = getDeploymentConfig(deploymentProfile);
+
+  // Fail fast before deploying: the registry mode is chosen by the profile while
+  // the network is chosen independently by --network, so guard against pushing a
+  // dev/mock registry onto a production chain (an irreversible mainnet mistake).
+  const chainId = hexQuantityToNumber(
+    (await connection.provider.request({ method: "eth_chainId" })) as string,
+  );
+  assertRegistryModeAllowedOnChain(chainId, config.mode, deploymentProfile);
 
   console.log(
     `Deploying profile "${deploymentProfile}" to network "${networkName}" in "${config.mode}" mode…`,
@@ -140,9 +149,6 @@ async function main() {
   const isLocalDeployment = writesLocalDeploymentArtifact(networkName);
   const deploymentName = isLocalDeployment ? "localhost" : networkName;
 
-  const chainId = hexQuantityToNumber(
-    (await connection.provider.request({ method: "eth_chainId" })) as string,
-  );
   const blockNumber = hexQuantityToNumber(
     (await connection.provider.request({
       method: "eth_blockNumber",
