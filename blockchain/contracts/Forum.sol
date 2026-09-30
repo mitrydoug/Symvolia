@@ -600,9 +600,13 @@ contract Forum is Multicall {
         uint absSupport = uint(
             _userSupport >= 0 ? _userSupport : -_userSupport
         );
-        return
-            (absSupport * (absSupport + creditMultiplier)) /
+        if (absSupport == 0) return 0;
+        uint _cost = (absSupport * (absSupport + creditMultiplier)) /
             (2 * creditMultiplier);
+        // Clamp any nonzero support to a minimum of one credit part so the
+        // smallest support increment is never free (resolves L-2). Only
+        // absSupport == 1 floors to zero, so this changes exactly that input.
+        return _cost == 0 ? 1 : _cost;
     }
 
     function _updateUserSupportedStatements(

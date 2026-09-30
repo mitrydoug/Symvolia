@@ -687,6 +687,63 @@ contract ForumTest is Test {
         );
     }
 
+    function testCostClampsSmallestSupportToOnePart() external {
+        // With creditMultiplier > 1 the raw quadratic cost of a single credit
+        // part floors to zero; the clamp charges a minimum of one part so the
+        // smallest support increment is never free (resolves L-2).
+        ForumHarness clampForum = new ForumHarness(
+            mockRegistry,
+            "",
+            Forum.ForumConfig({
+                maxRankedStatements: 3,
+                creditAllowanceIntervalSeconds: CREDIT_ALLOWANCE_INTERVAL_SECONDS,
+                engagementWindowSeconds: 60,
+                maxStatementLength: 120,
+                userCreditAllowancePerInterval: 25 * 100,
+                userStartingCredits: 1000 * 100,
+                minStatementSupportToRank: 2 * 100,
+                minAdjustmentIntervalSeconds: 12,
+                creditMultiplier: 100,
+                refundPenaltyBps: 0,
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: 1000,
+                statementRefillIntervalSeconds: 60
+            })
+        );
+
+        // Zero support is still free.
+        assertEq(
+            clampForum.exposed_costOfUserSupport(0),
+            0,
+            "Cost of 0 should be 0"
+        );
+        // One part would floor to 0 (1 * 101 / 200 == 0) -- clamp lifts it to 1.
+        assertEq(
+            clampForum.exposed_costOfUserSupport(1),
+            1,
+            "Smallest nonzero support should cost one part, not zero"
+        );
+        // The clamp applies to the magnitude, so -1 is also charged.
+        assertEq(
+            clampForum.exposed_costOfUserSupport(-1),
+            1,
+            "Cost of -1 should also be clamped to one part"
+        );
+        // Two parts already floors to 1 (2 * 102 / 200 == 1) -- unchanged.
+        assertEq(
+            clampForum.exposed_costOfUserSupport(2),
+            1,
+            "Cost of 2 parts should be 1 (unchanged by clamp)"
+        );
+        // A larger value whose floor is already > 0 is unaffected
+        // (20 * 120 / 200 == 12).
+        assertEq(
+            clampForum.exposed_costOfUserSupport(20),
+            12,
+            "Cost of 20 parts should be 12 (unchanged by clamp)"
+        );
+    }
+
     function testNegativeSupportCostSameAsPositive() external view {
         // Verify negative support has same cost as positive
         assertEq(
