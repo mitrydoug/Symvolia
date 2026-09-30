@@ -14,7 +14,6 @@ contract Forum is Multicall {
     // Custom errors
     error NotMember();
     error RankOutOfBounds(uint rank, uint rankedCount);
-    error StartOutOfBounds(uint start, uint statementCount);
     error InvalidStatementId(uint statementId);
     error StatementTooLong(uint length, uint maxLength);
     error UserNotRegistered(address user);
@@ -202,8 +201,13 @@ contract Forum is Multicall {
         uint _start,
         uint _limit
     ) external view returns (Statement[] memory) {
-        if (_start > statementCount)
-            revert StartOutOfBounds(_start, statementCount);
+        // A page starting at or past the end of the ranked list is not an
+        // error: return an empty page so callers can paginate to the tail
+        // without special-casing the boundary (and without reverting on a
+        // harmless view read).
+        if (_start >= rankedCount) {
+            return new Statement[](0);
+        }
 
         uint _length = _start + _limit <= rankedCount
             ? _limit

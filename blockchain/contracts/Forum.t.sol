@@ -1142,6 +1142,127 @@ contract ForumTest is Test {
     }
 
     // ======================================================================
+    // Section: getRankedStatementsPage pagination boundaries
+    // ======================================================================
+
+    /// @dev Seeds 4 statements where exactly 2 are ranked (ids 0 and 1, in
+    ///      that rank order) and 2 stay unranked, leaving rankedCount == 2 and
+    ///      statementCount == 4 so pagination past the ranked tail can be
+    ///      exercised.
+    function _seedTwoRankedOfFour() internal {
+        forum.addStatement("Ranked A", 5); // support 5 -> rank 0
+        forum.addStatement("Ranked B", 3); // support 3 -> rank 1
+        forum.addStatement("Unranked C", 0); // no support
+        forum.addStatement("Unranked D", 1); // below minStatementSupportToRank
+    }
+
+    function testGetRankedStatementsPageReturnsFullPage()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(0, 2);
+
+        assertEq(page.length, 2, "Page should contain both ranked statements");
+        assertEq(page[0].id, 0, "First entry should be rank 0 (id 0)");
+        assertEq(page[1].id, 1, "Second entry should be rank 1 (id 1)");
+    }
+
+    function testGetRankedStatementsPageRespectsLimit()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(0, 1);
+
+        assertEq(page.length, 1, "Limit of 1 should yield a single entry");
+        assertEq(page[0].id, 0, "Only entry should be rank 0 (id 0)");
+    }
+
+    function testGetRankedStatementsPageTruncatesToRankedTail()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        // start within range but limit overruns the ranked tail.
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(1, 10);
+
+        assertEq(
+            page.length,
+            1,
+            "Should truncate to the single remaining rank"
+        );
+        assertEq(page[0].id, 1, "Remaining entry should be rank 1 (id 1)");
+    }
+
+    /// @dev L-1: a start at the ranked boundary is not an error -- it returns
+    ///      an empty page rather than reverting.
+    function testGetRankedStatementsPageEmptyAtRankedBoundary()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(
+            forum.rankedCount(),
+            10
+        );
+
+        assertEq(page.length, 0, "Page at the ranked boundary should be empty");
+    }
+
+    /// @dev L-1 regression: previously `rankedCount - _start` underflowed and
+    ///      reverted when rankedCount < _start <= statementCount. It must now
+    ///      return an empty page instead.
+    function testGetRankedStatementsPageEmptyBetweenRankedAndStatementCount()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        // rankedCount == 2, statementCount == 4; start = 3 sits in the gap.
+        assertEq(forum.rankedCount(), 2, "Precondition: 2 ranked statements");
+        assertEq(forum.statementCount(), 4, "Precondition: 4 statements total");
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(3, 10);
+
+        assertEq(page.length, 0, "Page in the unranked gap should be empty");
+    }
+
+    /// @dev L-1: a start well past statementCount also returns empty rather
+    ///      than reverting.
+    function testGetRankedStatementsPageEmptyFarPastEnd()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(1000, 5);
+
+        assertEq(page.length, 0, "Page far past the end should be empty");
+    }
+
+    function testGetRankedStatementsPageEmptyWhenNothingRanked()
+        external
+        registeredMember
+    {
+        forum.addStatement("Unranked only", 0);
+
+        assertEq(forum.rankedCount(), 0, "Precondition: nothing ranked");
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(0, 10);
+
+        assertEq(
+            page.length,
+            0,
+            "Empty ranked list should yield an empty page"
+        );
+    }
+
+    // ======================================================================
     // Section 4: Tests for userSupportedStatements maintenance
     // ======================================================================
 
