@@ -49,6 +49,9 @@ settings — the Railway service name, CORS origins, gas-sponsorship approval, a
 the zkPassport verifier address — live in committed source
 (`deploy/backend-services.json`), so no GitHub *variables* are required.
 
+For the full inventory of every GitHub Actions secret (names, scope, and
+rotation — no values), see [docs/ci-secrets.md](../docs/ci-secrets.md).
+
 The GHCR publish workflow uses `GITHUB_TOKEN`; no Docker Hub or GHCR personal
 access token is required. After the first successful publish, make the GHCR
 package public so Railway and self-hosters can pull it without credentials.

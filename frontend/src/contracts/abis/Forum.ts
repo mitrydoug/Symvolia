@@ -174,22 +174,6 @@ export default [
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "start",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "statementCount",
-        "type": "uint256"
-      }
-    ],
-    "name": "StartOutOfBounds",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
         "name": "retryAfterTimestamp",
         "type": "uint256"
       }

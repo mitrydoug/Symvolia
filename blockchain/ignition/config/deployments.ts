@@ -223,3 +223,38 @@ export function requireDeploymentProfile(
 
   return profileName;
 }
+
+/**
+ * Chain IDs that MUST only ever receive a production (real-verifier) registry.
+ *
+ * Deploying a dev/mock registry to one of these chains would create a
+ * permissionless-registration system on a public mainnet, defeating the
+ * one-human-one-identity guarantee. The mistake is irreversible (redeploy +
+ * migration only), so these chains are guarded explicitly.
+ */
+export const PRODUCTION_ONLY_CHAIN_IDS = new Set<number>([
+  8453, // Base mainnet
+]);
+
+/**
+ * Guard against deploying a non-production registry to a production chain.
+ *
+ * The registry mode (dev/mock/production) is chosen by DEPLOYMENT_PROFILE while
+ * the target network is chosen independently by the Hardhat `--network` flag, so
+ * nothing otherwise prevents an operator from pointing a dev/mock profile at
+ * mainnet. Throws when that mismatch is detected.
+ */
+export function assertRegistryModeAllowedOnChain(
+  chainId: number,
+  mode: DeploymentConfig["mode"],
+  profileName: string,
+): void {
+  if (PRODUCTION_ONLY_CHAIN_IDS.has(chainId) && mode !== "production") {
+    throw new Error(
+      `Refusing to deploy a non-production registry to chain ${chainId}: ` +
+      `profile "${profileName}" selects "${mode}" mode. Production chains ` +
+      `require a production (real-verifier) registry. Verify DEPLOYMENT_PROFILE ` +
+      `and the --network flag before deploying.`,
+    );
+  }
+}

@@ -687,6 +687,63 @@ contract ForumTest is Test {
         );
     }
 
+    function testCostClampsSmallestSupportToOnePart() external {
+        // With creditMultiplier > 1 the raw quadratic cost of a single credit
+        // part floors to zero; the clamp charges a minimum of one part so the
+        // smallest support increment is never free (resolves L-2).
+        ForumHarness clampForum = new ForumHarness(
+            mockRegistry,
+            "",
+            Forum.ForumConfig({
+                maxRankedStatements: 3,
+                creditAllowanceIntervalSeconds: CREDIT_ALLOWANCE_INTERVAL_SECONDS,
+                engagementWindowSeconds: 60,
+                maxStatementLength: 120,
+                userCreditAllowancePerInterval: 25 * 100,
+                userStartingCredits: 1000 * 100,
+                minStatementSupportToRank: 2 * 100,
+                minAdjustmentIntervalSeconds: 12,
+                creditMultiplier: 100,
+                refundPenaltyBps: 0,
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: 1000,
+                statementRefillIntervalSeconds: 60
+            })
+        );
+
+        // Zero support is still free.
+        assertEq(
+            clampForum.exposed_costOfUserSupport(0),
+            0,
+            "Cost of 0 should be 0"
+        );
+        // One part would floor to 0 (1 * 101 / 200 == 0) -- clamp lifts it to 1.
+        assertEq(
+            clampForum.exposed_costOfUserSupport(1),
+            1,
+            "Smallest nonzero support should cost one part, not zero"
+        );
+        // The clamp applies to the magnitude, so -1 is also charged.
+        assertEq(
+            clampForum.exposed_costOfUserSupport(-1),
+            1,
+            "Cost of -1 should also be clamped to one part"
+        );
+        // Two parts already floors to 1 (2 * 102 / 200 == 1) -- unchanged.
+        assertEq(
+            clampForum.exposed_costOfUserSupport(2),
+            1,
+            "Cost of 2 parts should be 1 (unchanged by clamp)"
+        );
+        // A larger value whose floor is already > 0 is unaffected
+        // (20 * 120 / 200 == 12).
+        assertEq(
+            clampForum.exposed_costOfUserSupport(20),
+            12,
+            "Cost of 20 parts should be 12 (unchanged by clamp)"
+        );
+    }
+
     function testNegativeSupportCostSameAsPositive() external view {
         // Verify negative support has same cost as positive
         assertEq(
@@ -1139,6 +1196,127 @@ contract ForumTest is Test {
         Forum.Statement memory evicted = _getStatementById(2);
         assertEq(evicted.rank, -1, "Statement C should no longer be ranked");
         assertEq(evicted.support, 3, "Statement C should still have 3 support");
+    }
+
+    // ======================================================================
+    // Section: getRankedStatementsPage pagination boundaries
+    // ======================================================================
+
+    /// @dev Seeds 4 statements where exactly 2 are ranked (ids 0 and 1, in
+    ///      that rank order) and 2 stay unranked, leaving rankedCount == 2 and
+    ///      statementCount == 4 so pagination past the ranked tail can be
+    ///      exercised.
+    function _seedTwoRankedOfFour() internal {
+        forum.addStatement("Ranked A", 5); // support 5 -> rank 0
+        forum.addStatement("Ranked B", 3); // support 3 -> rank 1
+        forum.addStatement("Unranked C", 0); // no support
+        forum.addStatement("Unranked D", 1); // below minStatementSupportToRank
+    }
+
+    function testGetRankedStatementsPageReturnsFullPage()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(0, 2);
+
+        assertEq(page.length, 2, "Page should contain both ranked statements");
+        assertEq(page[0].id, 0, "First entry should be rank 0 (id 0)");
+        assertEq(page[1].id, 1, "Second entry should be rank 1 (id 1)");
+    }
+
+    function testGetRankedStatementsPageRespectsLimit()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(0, 1);
+
+        assertEq(page.length, 1, "Limit of 1 should yield a single entry");
+        assertEq(page[0].id, 0, "Only entry should be rank 0 (id 0)");
+    }
+
+    function testGetRankedStatementsPageTruncatesToRankedTail()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        // start within range but limit overruns the ranked tail.
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(1, 10);
+
+        assertEq(
+            page.length,
+            1,
+            "Should truncate to the single remaining rank"
+        );
+        assertEq(page[0].id, 1, "Remaining entry should be rank 1 (id 1)");
+    }
+
+    /// @dev L-1: a start at the ranked boundary is not an error -- it returns
+    ///      an empty page rather than reverting.
+    function testGetRankedStatementsPageEmptyAtRankedBoundary()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(
+            forum.rankedCount(),
+            10
+        );
+
+        assertEq(page.length, 0, "Page at the ranked boundary should be empty");
+    }
+
+    /// @dev L-1 regression: previously `rankedCount - _start` underflowed and
+    ///      reverted when rankedCount < _start <= statementCount. It must now
+    ///      return an empty page instead.
+    function testGetRankedStatementsPageEmptyBetweenRankedAndStatementCount()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        // rankedCount == 2, statementCount == 4; start = 3 sits in the gap.
+        assertEq(forum.rankedCount(), 2, "Precondition: 2 ranked statements");
+        assertEq(forum.statementCount(), 4, "Precondition: 4 statements total");
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(3, 10);
+
+        assertEq(page.length, 0, "Page in the unranked gap should be empty");
+    }
+
+    /// @dev L-1: a start well past statementCount also returns empty rather
+    ///      than reverting.
+    function testGetRankedStatementsPageEmptyFarPastEnd()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(1000, 5);
+
+        assertEq(page.length, 0, "Page far past the end should be empty");
+    }
+
+    function testGetRankedStatementsPageEmptyWhenNothingRanked()
+        external
+        registeredMember
+    {
+        forum.addStatement("Unranked only", 0);
+
+        assertEq(forum.rankedCount(), 0, "Precondition: nothing ranked");
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(0, 10);
+
+        assertEq(
+            page.length,
+            0,
+            "Empty ranked list should yield an empty page"
+        );
     }
 
     // ======================================================================

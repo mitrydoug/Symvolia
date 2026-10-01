@@ -14,7 +14,6 @@ contract Forum is Multicall {
     // Custom errors
     error NotMember();
     error RankOutOfBounds(uint rank, uint rankedCount);
-    error StartOutOfBounds(uint start, uint statementCount);
     error InvalidStatementId(uint statementId);
     error StatementTooLong(uint length, uint maxLength);
     error UserNotRegistered(address user);
@@ -202,8 +201,13 @@ contract Forum is Multicall {
         uint _start,
         uint _limit
     ) external view returns (Statement[] memory) {
-        if (_start > statementCount)
-            revert StartOutOfBounds(_start, statementCount);
+        // A page starting at or past the end of the ranked list is not an
+        // error: return an empty page so callers can paginate to the tail
+        // without special-casing the boundary (and without reverting on a
+        // harmless view read).
+        if (_start >= rankedCount) {
+            return new Statement[](0);
+        }
 
         uint _length = _start + _limit <= rankedCount
             ? _limit
@@ -596,9 +600,13 @@ contract Forum is Multicall {
         uint absSupport = uint(
             _userSupport >= 0 ? _userSupport : -_userSupport
         );
-        return
-            (absSupport * (absSupport + creditMultiplier)) /
+        if (absSupport == 0) return 0;
+        uint _cost = (absSupport * (absSupport + creditMultiplier)) /
             (2 * creditMultiplier);
+        // Clamp any nonzero support to a minimum of one credit part so the
+        // smallest support increment is never free (resolves L-2). Only
+        // absSupport == 1 floors to zero, so this changes exactly that input.
+        return _cost == 0 ? 1 : _cost;
     }
 
     function _updateUserSupportedStatements(
