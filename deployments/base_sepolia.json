@@ -5,17 +5,17 @@
   "deploymentProfile": "base-sepolia",
   "chainId": 84532,
   "registryMode": "mock",
-  "registryAddress": "0x43C515FAF9e28B4bAcD19d3803cf254EF055d317",
+  "registryAddress": "0x5C1e436De7B28c10f0A58D09f670377B05b9b9CD",
   "forumOrder": [
     "global",
     "USA",
     "CAN"
   ],
   "forums": {
-    "global": "0x5Ee636f29Ede8c51c5C3BFbCAb7B2cdB5f8F56FE",
-    "USA": "0x894576eb90AfE57Fd23951648E4834A4f9354D33",
-    "CAN": "0xaAC890075A66FeEA4B48923Da808F79241bb5fe7"
+    "global": "0x399aeE46Dc08DAf9526447F83A364e935DD5e59D",
+    "USA": "0xaA500158feF1F6Be6188067BaD6453c2176b8014",
+    "CAN": "0x4cd5342fA2463d37358ef57d5ec93B3A678FDA07"
   },
-  "deploymentBlockNumber": 47523529,
-  "updatedAt": "2026-10-01T00:42:26.668Z"
+  "deploymentBlockNumber": 47525059,
+  "updatedAt": "2026-10-01T01:33:27.127Z"
 }
