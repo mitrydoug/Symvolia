@@ -30,7 +30,7 @@ base-sepolia: ## Start dev env against committed Base Sepolia dev-registry contr
 .PHONY: base-sepolia-break-glass
 base-sepolia-break-glass: ## Break glass: redeploy fresh Base Sepolia contracts; requires CONFIRM_BASE_SEPOLIA_REDEPLOY=I_UNDERSTAND_THIS_WIPES_BASE_SEPOLIA_STATE
 	@test "$(CONFIRM_BASE_SEPOLIA_REDEPLOY)" = "I_UNDERSTAND_THIS_WIPES_BASE_SEPOLIA_STATE" || (echo "Set CONFIRM_BASE_SEPOLIA_REDEPLOY=I_UNDERSTAND_THIS_WIPES_BASE_SEPOLIA_STATE" && exit 1)
-	cd blockchain && DEPLOYMENT_PROFILE=base-sepolia npx hardhat compile --build-profile production && DEPLOYMENT_PROFILE=base-sepolia npx hardhat run scripts/deploy.ts --network base_sepolia
+	cd blockchain && DEPLOYMENT_PROFILE=base-sepolia npx hardhat compile --build-profile production && FORCE_FRESH_DEPLOY=1 DEPLOYMENT_PROFILE=base-sepolia npx hardhat run scripts/deploy.ts --network base_sepolia
 	node scripts/generate-deployment-artifacts.mjs base_sepolia
 	node scripts/generate-backend-env-examples.mjs
 

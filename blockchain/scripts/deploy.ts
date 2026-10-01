@@ -1,6 +1,14 @@
 import hre from "hardhat";
 import path from "path";
-import { mkdirSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
+import { createHash } from "crypto";
 import { createForumProductionModule } from "../ignition/modules/ForumProduction.js";
 import { createForumDevModule } from "../ignition/modules/ForumDevRegistry.js";
 import { createForumMockModule } from "../ignition/modules/ForumMockRegistry.js";
@@ -23,6 +31,49 @@ const supportsNetworkHelpers = (networkName: string) =>
 
 const hexQuantityToNumber = (value: string) => Number(BigInt(value));
 
+/**
+ * Fingerprint the compiled, deployable contract artifacts (ABI + bytecode).
+ *
+ * Test contracts (`*.t.sol`) are excluded because they never reach chain. The
+ * resulting hash is recorded in the deployment artifact so a later deploy can
+ * detect when the contracts have changed and clear stale Ignition journal state.
+ */
+const computeDeployableArtifactFingerprint = (): string => {
+  const contractsArtifactsDir = path.resolve(
+    import.meta.dirname,
+    "../artifacts/contracts",
+  );
+  const artifactFiles: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name.endsWith(".t.sol")) continue; // skip test contracts
+        walk(entryPath);
+      } else if (
+        entry.name.endsWith(".json") &&
+        !entry.name.endsWith(".dbg.json")
+      ) {
+        artifactFiles.push(entryPath);
+      }
+    }
+  };
+  walk(contractsArtifactsDir);
+  artifactFiles.sort();
+
+  const hash = createHash("sha256");
+  for (const file of artifactFiles) {
+    const artifact = JSON.parse(readFileSync(file, "utf8"));
+    hash.update(path.relative(contractsArtifactsDir, file));
+    hash.update("\0");
+    hash.update(JSON.stringify(artifact.abi ?? []));
+    hash.update("\0");
+    hash.update(artifact.bytecode ?? "");
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+};
+
 async function main() {
   const connection = await hre.network.connect();
   const { networkName, ignition } = connection;
@@ -43,6 +94,48 @@ async function main() {
     `Deploying profile "${deploymentProfile}" to network "${networkName}" in "${config.mode}" mode…`,
   );
   console.log(`Forums: ${config.forums.join(", ")}`);
+
+  // Resolve where this deploy's shared artifact lives so we can compare the
+  // previously-deployed contract fingerprint against the freshly compiled one.
+  const isLocalDeployment = writesLocalDeploymentArtifact(networkName);
+  const deploymentName = isLocalDeployment ? "localhost" : networkName;
+  const deploymentsDir = path.resolve(import.meta.dirname, "../../deployments");
+  const deploymentPath = path.join(deploymentsDir, `${deploymentName}.json`);
+
+  // Clear stale Ignition journal state when the contracts have changed. Ignition
+  // is idempotent: once a contract is recorded in its per-chain journal it is
+  // never redeployed — even if its bytecode changed — so edited contracts would
+  // otherwise silently never reach chain. FORCE_FRESH_DEPLOY=1 always wipes
+  // (used by the break-glass redeploy target).
+  const artifactFingerprint = computeDeployableArtifactFingerprint();
+  const previousFingerprint =
+    (existsSync(deploymentPath)
+      ? (JSON.parse(readFileSync(deploymentPath, "utf8"))
+          .artifactFingerprint as string | undefined)
+      : undefined) ?? null;
+  const journalDir = path.resolve(
+    import.meta.dirname,
+    "../ignition/deployments",
+    `chain-${chainId}`,
+  );
+  if (existsSync(journalDir)) {
+    if (process.env.FORCE_FRESH_DEPLOY === "1") {
+      rmSync(journalDir, { recursive: true, force: true });
+      console.log(
+        `FORCE_FRESH_DEPLOY set — cleared Ignition journal at ${journalDir}.`,
+      );
+    } else if (previousFingerprint !== artifactFingerprint) {
+      rmSync(journalDir, { recursive: true, force: true });
+      console.log(
+        "Compiled contracts changed since the last deploy — cleared Ignition " +
+          `journal at ${journalDir} to force a fresh deployment.`,
+      );
+    } else {
+      console.log(
+        `Compiled contracts unchanged — reusing Ignition journal at ${journalDir}.`,
+      );
+    }
+  }
 
   let registry: DeployedContract;
   let forums: Record<string, DeployedContract>;
@@ -144,18 +237,12 @@ async function main() {
     }
   }
 
-  // Local development networks share the localhost deployment artifact;
-  // public networks use their actual Hardhat network name.
-  const isLocalDeployment = writesLocalDeploymentArtifact(networkName);
-  const deploymentName = isLocalDeployment ? "localhost" : networkName;
-
   const blockNumber = hexQuantityToNumber(
     (await connection.provider.request({
       method: "eth_blockNumber",
     })) as string,
   );
 
-  const deploymentsDir = path.resolve(import.meta.dirname, "../../deployments");
   mkdirSync(deploymentsDir, { recursive: true });
 
   const deploymentJson = {
@@ -169,10 +256,10 @@ async function main() {
     forumOrder: config.forums,
     forums: forumAddresses,
     deploymentBlockNumber: blockNumber,
+    artifactFingerprint,
     updatedAt: new Date().toISOString(),
   };
 
-  const deploymentPath = path.join(deploymentsDir, `${deploymentName}.json`);
   writeFileSync(deploymentPath, `${JSON.stringify(deploymentJson, null, 2)}\n`);
   console.log(`Wrote shared deployment artifact to ${deploymentPath}`);
 
