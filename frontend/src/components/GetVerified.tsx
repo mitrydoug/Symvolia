@@ -67,13 +67,10 @@ import AndroidIcon from "@mui/icons-material/Android";
 const PUBLIC_LOGO_FALLBACK_ORIGIN = "https://test.symvolia.org";
 const logoOrigin =
   window.location.hostname === "localhost" ||
-    window.location.hostname === "127.0.0.1"
+  window.location.hostname === "127.0.0.1"
     ? PUBLIC_LOGO_FALLBACK_ORIGIN
     : window.location.origin;
-const SYMVOLIA_LOGO_URL = new URL(
-  "/symvolia-icon.png",
-  logoOrigin,
-).toString();
+const SYMVOLIA_LOGO_URL = new URL("/symvolia-icon.png", logoOrigin).toString();
 const MY_SCOPE = "symvolia-verify";
 
 const ZKPASSPORT_URL = "https://zkpassport.id";
@@ -138,27 +135,27 @@ const NavButtons: FC<{
   nextDisabled = false,
   backLabel = "Back",
 }) => (
-    <Stack direction="row" justifyContent="space-between" sx={{ mt: 4 }}>
+  <Stack direction="row" justifyContent="space-between" sx={{ mt: 4 }}>
+    <Button
+      variant="text"
+      startIcon={<ArrowBackIcon />}
+      onClick={onBack}
+      size="medium"
+    >
+      {backLabel}
+    </Button>
+    {onNext && (
       <Button
-        variant="text"
-        startIcon={<ArrowBackIcon />}
-        onClick={onBack}
+        endIcon={<ArrowForwardIcon />}
+        onClick={onNext}
+        disabled={nextDisabled}
         size="medium"
       >
-        {backLabel}
+        {nextLabel}
       </Button>
-      {onNext && (
-        <Button
-          endIcon={<ArrowForwardIcon />}
-          onClick={onNext}
-          disabled={nextDisabled}
-          size="medium"
-        >
-          {nextLabel}
-        </Button>
-      )}
-    </Stack>
-  );
+    )}
+  </Stack>
+);
 
 // ─── Step 0: Why Verify ──────────────────────────────────────────────────────
 
@@ -772,16 +769,16 @@ const StepScanVerify: FC<{
       const { url, onGeneratingProof, onProofGenerated, onReject, onError } =
         revealNationality
           ? queryBuilder
-            .gte("age", 18)
-            .disclose("nationality")
-            .bind("chain", zkPassportBindChain)
-            .bind("user_address", participantAddress)
-            .done()
+              .gte("age", 18)
+              .disclose("nationality")
+              .bind("chain", zkPassportBindChain)
+              .bind("user_address", participantAddress)
+              .done()
           : queryBuilder
-            .gte("age", 18)
-            .bind("chain", zkPassportBindChain)
-            .bind("user_address", participantAddress)
-            .done();
+              .gte("age", 18)
+              .bind("chain", zkPassportBindChain)
+              .bind("user_address", participantAddress)
+              .done();
 
       onProofGenerated((proofResult) => {
         // Format the proof for on-chain submission the moment it arrives. We

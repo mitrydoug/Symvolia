@@ -70,7 +70,6 @@ export const blockPollingIntervalMs = Number.isFinite(_rawBlockPollingInterval)
   : 60_000;
 
 export const privyAppId = optionalEnvValue(import.meta.env.VITE_PRIVY_APP_ID);
-export const privyAppClientId = import.meta.env.VITE_PRIVY_APP_CLIENT_ID;
 const isGasSponsorshipRequested =
   import.meta.env.VITE_ENABLE_GAS_SPONSORSHIP === "true";
 const gasSponsorshipSupportedChainIds: ReadonlySet<number> = new Set([

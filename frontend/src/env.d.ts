@@ -29,9 +29,6 @@ interface ImportMetaEnv {
   /** Privy app ID for embedded wallet and external wallet login. */
   readonly VITE_PRIVY_APP_ID?: string;
 
-  /** Optional Privy app client ID, when configured in the Privy dashboard. */
-  readonly VITE_PRIVY_APP_CLIENT_ID?: string;
-
   /** Enables Privy smart-wallet sponsored transactions when set to "true". */
   readonly VITE_ENABLE_GAS_SPONSORSHIP?: string;
 
