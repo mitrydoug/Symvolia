@@ -10,6 +10,18 @@ const BASE_SEPOLIA_FORK_BLOCK_NUMBER = Number(
   process.env.BASE_SEPOLIA_FORK_BLOCK_NUMBER ?? "43106971",
 );
 
+// Base MAINNET fork pin. Left unset by default so the fork anchors to the
+// LATEST block (minimizing the initial offset from real time). Note a fork's
+// block.timestamp does NOT track wall-clock on its own — it stays frozen near
+// the forked block until blocks are mined — so the base-fork dev flow realigns
+// the chain clock to real time at startup (see scripts/dev/contracts.sh,
+// realign_fork_clock). Set BASE_MAINNET_FORK_BLOCK_NUMBER only to pin for
+// reproducibility; a stale pin breaks zkPassport proof-validity checks.
+const BASE_MAINNET_FORK_BLOCK_NUMBER = process.env
+  .BASE_MAINNET_FORK_BLOCK_NUMBER
+  ? Number(process.env.BASE_MAINNET_FORK_BLOCK_NUMBER)
+  : undefined;
+
 const config: HardhatUserConfig = {
   plugins: [hardhatToolboxViemPlugin, hardhatNetworkHelpers, hardhatKeystore],
   solidity: {
@@ -37,6 +49,15 @@ const config: HardhatUserConfig = {
       forking: {
         url: configVariable("BASE_SEPOLIA_RPC_URL"),
         blockNumber: BASE_SEPOLIA_FORK_BLOCK_NUMBER,
+      },
+    },
+    local_base_mainnet_fork: {
+      type: "edr-simulated",
+      forking: {
+        url: configVariable("BASE_RPC_URL"),
+        ...(BASE_MAINNET_FORK_BLOCK_NUMBER !== undefined
+          ? { blockNumber: BASE_MAINNET_FORK_BLOCK_NUMBER }
+          : {}),
       },
     },
     base: {

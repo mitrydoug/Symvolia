@@ -67,6 +67,33 @@ set_local_mining() {
     "${INDEXER_RPC_URL}" > /dev/null
 }
 
+realign_fork_clock() {
+  # A Hardhat fork anchors block.timestamp to the forked block and never jumps
+  # it to real wall-clock — it only advances as blocks are mined. The zkPassport
+  # verifier requires block.timestamp >= the proof's generation date (within a
+  # 7-day window), so a lagging fork clock reverts registration with "The proof
+  # was generated outside the validity period". Snap the chain clock to real
+  # "now" and enable interval mining so it keeps tracking real time while you
+  # scan a passport. (Being a few seconds ahead of now is fine and desirable.)
+  local now
+  now="$(date +%s)"
+
+  curl -sf \
+    -H 'content-type: application/json' \
+    --data "{\"jsonrpc\":\"2.0\",\"method\":\"evm_setNextBlockTimestamp\",\"params\":[${now}],\"id\":1}" \
+    "${INDEXER_RPC_URL}" > /dev/null
+  curl -sf \
+    -H 'content-type: application/json' \
+    --data '{"jsonrpc":"2.0","method":"evm_mine","params":[],"id":1}' \
+    "${INDEXER_RPC_URL}" > /dev/null
+  curl -sf \
+    -H 'content-type: application/json' \
+    --data '{"jsonrpc":"2.0","method":"evm_setIntervalMining","params":[2000],"id":1}' \
+    "${INDEXER_RPC_URL}" > /dev/null
+
+  echo "⏰ Realigned fork clock to real time + interval mining (2s) so zkPassport proofs stay inside their validity window."
+}
+
 seed_contract_state() {
   case "${SEED_PROFILE:-none}" in
     none)
@@ -114,9 +141,15 @@ cd "${REPO_ROOT}"
 clear_ready_marker
 
 case "${PROFILE}" in
-  local-dev | local-mocked | local-forked | local-stress-test)
+  local-dev | local-mocked | local-forked | local-stress-test | base-fork)
     wait_for_rpc
     clear_generated_artifacts "${VITE_NETWORK}"
+
+    # base-fork runs the REAL zkPassport verifier against a Base-mainnet fork,
+    # whose block.timestamp otherwise lags wall-clock and fails proof validity.
+    if [ "${PROFILE}" = "base-fork" ]; then
+      realign_fork_clock
+    fi
 
     echo "🚀 Deploying contracts (profile: ${DEPLOYMENT_PROFILE}, network: ${DEPLOY_NETWORK})…"
     cd "${REPO_ROOT}/blockchain"

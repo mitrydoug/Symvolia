@@ -34,6 +34,24 @@ base-sepolia-break-glass: ## Break glass: redeploy fresh Base Sepolia contracts;
 	node scripts/generate-deployment-artifacts.mjs base_sepolia
 	node scripts/generate-backend-env-examples.mjs
 
+# ── Base Mainnet (fork testing + production deploy) ──────────────────────────
+
+.PHONY: base-fork
+base-fork: ## Start local dev env on a Base MAINNET fork with the REAL verifier (needs BASE_RPC_URL in .env.local)
+	overmind start -f Procfile.base-fork
+
+.PHONY: base-fork-dry-run
+base-fork-dry-run: ## Dry-run the production Base MAINNET deploy against a local mainnet fork (needs BASE_RPC_URL); spends no real ETH
+	cd blockchain && npx hardhat compile --build-profile production && npx hardhat run scripts/fork-dry-run.ts --network local_base_mainnet_fork
+
+.PHONY: base-break-glass
+base-break-glass: ## Break glass: INITIAL fresh Base MAINNET deploy (REAL ETH, immutable); requires CONFIRM_BASE_MAINNET_DEPLOY=I_UNDERSTAND_THIS_IS_REAL_MAINNET
+	@test "$(CONFIRM_BASE_MAINNET_DEPLOY)" = "I_UNDERSTAND_THIS_IS_REAL_MAINNET" || (echo "Set CONFIRM_BASE_MAINNET_DEPLOY=I_UNDERSTAND_THIS_IS_REAL_MAINNET" && exit 1)
+	cd blockchain && npx tsx scripts/check-balance.ts base
+	cd blockchain && DEPLOYMENT_PROFILE=base npx hardhat compile --build-profile production && FORCE_FRESH_DEPLOY=1 DEPLOYMENT_PROFILE=base npx hardhat run scripts/deploy.ts --network base
+	node scripts/generate-deployment-artifacts.mjs base
+	node scripts/generate-backend-env-examples.mjs
+
 .PHONY: local-stop
 local-stop: ## Stop all local dev processes and Meilisearch container
 	-overmind stop 2>/dev/null || true

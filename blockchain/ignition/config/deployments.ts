@@ -131,6 +131,32 @@ const deploymentConfigs: Record<string, DeploymentConfig> = {
     statementRefillIntervalSeconds: 60,
   },
 
+  /**
+   * Local Base MAINNET fork running the REAL production registry (real verifier,
+   * forked from Base mainnet) with snappy local-dev economics. Used by
+   * `make base-fork` to exercise the on-chain zkPassport proof flow end to end
+   * against the production verifier, served from http://localhost (domain
+   * "localhost", chain binding "local" = chainId 31337).
+   */
+  "base-fork": {
+    mode: "production",
+    forums: ["global", "USA", "CAN"],
+    creditAllowanceIntervalSeconds: 60,
+    engagementWindowSeconds: 300,
+    maxRankedStatements: 10,
+    minStatementSupportToRank: 3 * CRED_MULT,
+    maxStatementLength: 120,
+    userCreditAllowancePerInterval: 25 * CRED_MULT,
+    userStartingCredits: 1000 * CRED_MULT,
+    minAdjustmentIntervalSeconds: 12,
+    creditMultiplier: CRED_MULT,
+    refundPenaltyBps: 2000,
+    decaySpeedupFactor: 2016,
+    statementBurstCapacity: 1000,
+    statementRefillIntervalSeconds: 60,
+    parametersFile: "base-fork.json",
+  },
+
   /** Base mainnet production deployment. */
   base: {
     mode: "production",
