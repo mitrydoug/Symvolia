@@ -33,12 +33,35 @@
           "custom_domain": true
         }
       ]
+    },
+    // Production site (symvolia.org), fed by the release branch. NOT LIVE YET —
+    // this block is a stub: the Pinata gateway custom domain, the apex DNS
+    // custom-domain route, and the release-branch CI deploy still need wiring
+    // (see Phase 6 of docs/productionization-checklist.md). CI will deploy with
+    // `wrangler deploy --env production --var IPFS_CID:<cid>`.
+    "production": {
+      "name": "symvolia",
+      "vars": {
+        // Same Pinata gateway custom domain as test (reused); must differ from
+        // the Worker's own public domain (symvolia.org) or requests would loop.
+        "IPFS_GATEWAY": "ipfs.symvolia.org",
+        // CID of the current build. CI overrides this per deploy via
+        // `--var IPFS_CID:<cid>`; the placeholder is only for manual/local runs.
+        "IPFS_CID": "REPLACE_WITH_CURRENT_BUILD_CID",
+        // CSP delivery mode (read by applySecurityHeaders in src/index.js).
+        // Start in "report-only" so missed hosts surface as violation reports
+        // instead of breaking the proof → register → vote flow; flip to
+        // "enforce" once alpha traffic produces zero legitimate CSP violations.
+        "CSP_MODE": "report-only"
+      },
+      // Binds this Worker to the apex domain. Cloudflare provisions TLS and
+      // manages the routing DNS record for the Custom Domain.
+      "routes": [
+        {
+          "pattern": "symvolia.org",
+          "custom_domain": true
+        }
+      ]
     }
-    // A "production" environment (symvolia.org) will be added here later, e.g.:
-    // "production": {
-    //   "name": "symvolia",
-    //   "vars": { "IPFS_GATEWAY": "ipfs.symvolia.org", "IPFS_CID": "..." },
-    //   "routes": [{ "pattern": "symvolia.org", "custom_domain": true }]
-    // }
   }
 }

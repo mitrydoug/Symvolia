@@ -28,10 +28,69 @@ const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const HTML_CACHE_CONTROL = "public, max-age=0, must-revalidate";
 const STATIC_CACHE_CONTROL = "public, max-age=3600";
 
+// ── Security headers ─────────────────────────────────────────────────────────
+// Content-Security-Policy is Privy's #1 production hardening requirement: it
+// constrains the embedded-wallet surface against XSS, clickjacking and
+// cross-site data leaks. We ship it Report-Only first (per Privy's rollout
+// guidance) so any missed host surfaces as a console report instead of breaking
+// the live proof → register → vote flow; set the `CSP_MODE` Worker var to
+// "enforce" (per environment, in wrangler.jsonc) to emit the enforcing
+// `Content-Security-Policy` header once zero legitimate violations remain.
+//
+// `script-src` is kept tight ('self' + Cloudflare Turnstile only) — that is the
+// directive that actually blocks injected scripts. `connect-src`/`frame-src`
+// are scoped to our known SDK vendors (Privy, WalletConnect, Alchemy,
+// zkPassport) plus our backend. Do NOT add COOP/COEP here: they break the
+// cross-origin wallet popups we rely on (see GetVerified.tsx).
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "script-src 'self' https://challenges.cloudflare.com",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' https://fonts.gstatic.com",
+  "worker-src 'self' blob:",
+  [
+    "frame-src 'self'",
+    "https://*.privy.io",
+    "https://verify.walletconnect.com",
+    "https://verify.walletconnect.org",
+    "https://challenges.cloudflare.com",
+  ].join(" "),
+  [
+    "connect-src 'self'",
+    "https://*.privy.io",
+    "https://*.rpc.privy.systems",
+    "https://*.walletconnect.com",
+    "https://*.walletconnect.org",
+    "wss://*.walletconnect.com",
+    "wss://*.walletconnect.org",
+    "wss://*.walletlink.org",
+    "https://*.g.alchemy.com",
+    "https://*.zkpassport.id",
+    "wss://*.zkpassport.id",
+    "https://symvolia-backend-production.up.railway.app",
+    "https://symvolia-backend-development.up.railway.app",
+  ].join(" "),
+].join("; ");
+
+// Cheap defense-in-depth headers applied to every response. HSTS is
+// intentionally omitted — Cloudflare already issues Strict-Transport-Security
+// for the custom domain, so duplicating it here risks conflicting max-ages.
+const SECURITY_HEADERS = {
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), geolocation=(), microphone=()",
+};
+
 export default {
   /**
    * @param {Request} request
-   * @param {{ IPFS_GATEWAY?: string; IPFS_CID?: string }} env
+   * @param {{ IPFS_GATEWAY?: string; IPFS_CID?: string; CSP_MODE?: string }} env
    * @param {{ waitUntil: (p: Promise<unknown>) => void }} ctx
    */
   async fetch(request, env, ctx) {
@@ -68,10 +127,10 @@ export default {
       isNavigationRequest(request, url.pathname)
     ) {
       const indexResponse = await fetchFromGateway(base, "/index.html", "", ctx);
-      return withResponseHeaders(indexResponse, "/index.html");
+      return withResponseHeaders(indexResponse, "/index.html", env);
     }
 
-    return withResponseHeaders(originResponse, url.pathname);
+    return withResponseHeaders(originResponse, url.pathname, env);
   },
 };
 
@@ -110,13 +169,15 @@ async function fetchFromGateway(base, pathname, search, ctx) {
 }
 
 /**
- * Rewrite the browser-facing Cache-Control header based on the request path.
+ * Rewrite the browser-facing Cache-Control header based on the request path and
+ * attach the security headers (single response chokepoint).
  *
  * @param {Response} response
  * @param {string} pathname
+ * @param {{ CSP_MODE?: string }} env
  * @returns {Response}
  */
-function withResponseHeaders(response, pathname) {
+function withResponseHeaders(response, pathname, env) {
   const headers = new Headers(response.headers);
 
   if (pathname.startsWith("/assets/")) {
@@ -128,11 +189,37 @@ function withResponseHeaders(response, pathname) {
     headers.set("Cache-Control", STATIC_CACHE_CONTROL);
   }
 
+  applySecurityHeaders(headers, pathname, env);
+
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
     headers,
   });
+}
+
+/**
+ * Attach security headers at the single response chokepoint. The cheap
+ * hardening headers go on every response; the Content-Security-Policy (which
+ * only has meaning for a browsing context) is scoped to HTML documents. CSP is
+ * Report-Only unless the environment sets `CSP_MODE=enforce`.
+ *
+ * @param {Headers} headers
+ * @param {string} pathname
+ * @param {{ CSP_MODE?: string }} env
+ */
+function applySecurityHeaders(headers, pathname, env) {
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+    headers.set(name, value);
+  }
+
+  if (isHtmlPath(pathname)) {
+    const cspHeader =
+      env?.CSP_MODE === "enforce"
+        ? "Content-Security-Policy"
+        : "Content-Security-Policy-Report-Only";
+    headers.set(cspHeader, CONTENT_SECURITY_POLICY);
+  }
 }
 
 /**
