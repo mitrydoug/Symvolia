@@ -1,41 +1,65 @@
 import { FC, useState } from "react";
 import {
   Box,
-  Button,
+  Divider,
   List,
   ListItemButton,
   ListItemIcon,
   ListItemText,
 } from "@mui/material";
-import { useLocation, useNavigate } from "react-router-dom";
-import { useTheme } from "@mui/material/styles";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { theme } from "../theme";
 import HomeIcon from "@mui/icons-material/Home";
-import FavoriteBorderIcon from "@mui/icons-material/FavoriteBorder";
+import FavoriteIcon from "@mui/icons-material/Favorite";
 import ArticleIcon from "@mui/icons-material/Article";
-import BookmarkBorderIcon from "@mui/icons-material/BookmarkBorder";
-import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
-import CreateIcon from "@mui/icons-material/Create";
-import WriteModal from "./WriteModal";
-import { useUserVotes } from "../state/UserVotes";
-import useLocalStorageSet from "@/hooks/useLocalStorageSet";
+import StarIcon from "@mui/icons-material/Star";
+import HelpIcon from "@mui/icons-material/Help";
+import { useUserVerification } from "../state/UserVotes";
+import ChooseForumModal from "./ChooseForumModal";
+import ForumSelectorChip from "./ForumSelectorChip";
+import AppVersionLabel from "./AppVersionLabel";
+import { useForum, forumToSlug } from "../state/Forum";
+import { useForumNavigate, useForumPath } from "../hooks/useForumNavigate";
+import useLogoSrc from "@/hooks/useLogoSrc";
 
 const NAV_ITEMS = [
-  { label: "Home", href: "/top", icon: <HomeIcon /> },
-  { label: "Your Support", href: "/my-support", icon: <FavoriteBorderIcon /> },
-  { label: "My Statements", href: "/my-statements", icon: <ArticleIcon /> },
-  { label: "Bookmarked", href: "/bookmarked", icon: <BookmarkBorderIcon /> },
-  { label: "How it works", href: "#", icon: <HelpOutlineIcon /> },
+  { label: "Home", href: "/", icon: <HomeIcon />, memberOnly: false },
+  {
+    label: "My Support",
+    href: "/my-support",
+    icon: <FavoriteIcon />,
+    memberOnly: true,
+  },
+  {
+    label: "My Statements",
+    href: "/my-statements",
+    icon: <ArticleIcon />,
+    memberOnly: true,
+  },
+  {
+    label: "Starred",
+    href: "/starred",
+    icon: <StarIcon sx={{ color: "text.secondary" }} />,
+    memberOnly: false,
+  },
+  {
+    label: "How it works",
+    href: "/how-it-works",
+    icon: <HelpIcon />,
+    memberOnly: false,
+  },
 ];
 
 const SideNav: FC = () => {
   const location = useLocation();
-  const navigate = useNavigate();
-  const theme = useTheme();
-  const { isUserVerified } = useUserVotes();
-  const { add: addAuthoredStatement } =
-    useLocalStorageSet("authoredStatements");
+  const navigate = useForumNavigate();
+  const rawNavigate = useNavigate();
+  const { isUserVerified, isVerifiedLoading } = useUserVerification();
+  const { name: forumName, setForum } = useForum();
+  const forumPath = useForumPath();
+  const logoSrc = useLogoSrc();
 
-  const [writeModalOpen, setWriteModalOpen] = useState(false);
+  const [chooseForumModalOpen, setChooseForumModalOpen] = useState(false);
 
   return (
     <>
@@ -49,19 +73,46 @@ const SideNav: FC = () => {
           alignSelf: "flex-start",
         }}
       >
+        {/* Logo */}
+        <Box sx={{ mb: 0, display: "flex", justifyContent: "center" }}>
+          <Link to={forumPath("/")} style={{ textDecoration: "none" }}>
+            <img
+              src={logoSrc}
+              alt="Symvolia"
+              style={{ height: "3.1rem", width: "auto" }}
+            />
+          </Link>
+        </Box>
+
+        {/* Forum selector — centered between logo and nav list */}
+        <Box
+          sx={{
+            mt: -1,
+            mb: 1.5,
+            display: "flex",
+            justifyContent: "center",
+          }}
+        >
+          <ForumSelectorChip
+            forumName={forumName}
+            onClick={() => setChooseForumModalOpen(true)}
+            iconSize="1.8rem"
+          />
+        </Box>
+
         <List disablePadding>
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter(
+            (item) => !item.memberOnly || isUserVerified || isVerifiedLoading,
+          ).map((item) => {
             const isActive =
-              item.href !== "#" &&
-              (location.pathname === item.href ||
-                (item.href === "/top" && location.pathname === "/"));
+              item.href !== "#" && location.pathname === forumPath(item.href);
 
             return (
               <ListItemButton
                 key={item.label}
                 selected={isActive}
                 onClick={() => {
-                  if (item.href !== "#") navigate(item.href);
+                  if (item.href !== "#") void navigate(item.href);
                 }}
                 disabled={item.href === "#"}
                 sx={{ borderRadius: 2, mb: 0.5 }}
@@ -69,29 +120,31 @@ const SideNav: FC = () => {
                 <ListItemIcon sx={{ minWidth: 40 }}>{item.icon}</ListItemIcon>
                 <ListItemText
                   primary={item.label}
-                  primaryTypographyProps={{ fontWeight: isActive ? 600 : 400 }}
+                  slotProps={{
+                    primary: { fontWeight: isActive ? 600 : 400 },
+                  }}
                 />
               </ListItemButton>
             );
           })}
         </List>
 
-        <Box sx={{ px: 1, mt: 2 }}>
-          <Button
-            fullWidth
-            startIcon={<CreateIcon />}
-            onClick={() => setWriteModalOpen(true)}
-            disabled={!isUserVerified}
-          >
-            Write
-          </Button>
+        <Divider sx={{ mt: 2.5, mb: 1.5, mx: 1.5 }} />
+
+        <Box sx={{ px: 1 }}>
+          <AppVersionLabel align="center" />
         </Box>
       </Box>
 
-      <WriteModal
-        open={writeModalOpen}
-        onClose={() => setWriteModalOpen(false)}
-        onStatementAdded={addAuthoredStatement}
+      <ChooseForumModal
+        open={chooseForumModalOpen}
+        onClose={() => setChooseForumModalOpen(false)}
+        chooseForum={(forum: string) => {
+          setForum(forum);
+          setChooseForumModalOpen(false);
+          const slug = forumToSlug(forum);
+          void rawNavigate(`/${slug}`);
+        }}
       />
     </>
   );

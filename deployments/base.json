@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "network": "base",
+  "deployNetwork": "base",
+  "deploymentProfile": "base",
+  "chainId": 8453,
+  "registryMode": "production",
+  "registryAddress": "0x95e0f4F8898C46a7511241dBEF3b5a0a5933e1d1",
+  "forumOrder": [
+    "global",
+    "USA",
+    "CAN"
+  ],
+  "forums": {
+    "global": "0x7D3d1Ea00A9874eFA5a102cd1c534ec9b445032F",
+    "USA": "0x16392cD70b9457179223ef655D1db2841631Ddb8",
+    "CAN": "0xa0a5353b3760985ECd9a8D01E91416c6065bcd6d"
+  },
+  "deploymentBlockNumber": 52178473,
+  "artifactFingerprint": "59858360573abb84bd806481caa85dac807fe185ad953a72ad28fde8634cb5b1",
+  "updatedAt": "2026-10-04T20:38:13.863Z"
+}

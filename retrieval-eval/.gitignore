@@ -1,0 +1,23 @@
+# Downloaded / generated evaluation assets — never committed.
+# All of these are (re)produced by `npm run eval:*` and can be large.
+
+# Local install for this standalone package.
+node_modules/
+
+# Model weights (Transformers.js / Xenova ONNX), computed embeddings, and
+# downloaded dataset archives + their extractions.
+datasets/.cache/
+
+# Imported BEIR datasets (fetched + remapped via `npm run eval:import:*`).
+datasets/quora/
+datasets/arguana/
+datasets/cqadupstack-*/
+
+# Generated topic-clusters dataset — deterministically rebuilt from the
+# committed fixture (blockchain/fixtures/stress-statements.txt) via
+# `npm run eval:search:build`. Not committed to keep the package lean.
+datasets/topic-clusters/
+
+# Evaluation run outputs — regenerated on every `npm run eval:*` run
+# (report.json alone is ~12k lines). Reproducible, so never committed.
+reports/

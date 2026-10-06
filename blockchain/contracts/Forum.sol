@@ -1,39 +1,82 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.28;
 
-import "./IOurVoiceRegistry.sol";
+import "./ISymvoliaRegistry.sol";
 import "./StringUtils.sol";
 import "./DecayUtils.sol";
+import "./TokenBucket.sol";
+import "@openzeppelin/contracts/utils/Multicall.sol";
 
-contract Forum {
+// All credit values are denominated in fractional parts (e.g. microcredits).
+// The creditMultiplier parameter defines the number of parts per whole credit.
+
+contract Forum is Multicall {
     // Custom errors
     error NotMember();
     error RankOutOfBounds(uint rank, uint rankedCount);
-    error StartOutOfBounds(uint start, uint statementCount);
     error InvalidStatementId(uint statementId);
     error StatementTooLong(uint length, uint maxLength);
     error UserNotRegistered(address user);
     error InsufficientCredits(uint available, int required);
+    error TimestampOrderInvalid(uint fromTimestamp, uint toTimestamp);
+    error DuplicateAdjustment(uint statementId);
+    error EmptyStatement();
+    error StatementRateLimited(uint retryAfterTimestamp);
 
-    // Maximum length (in chars) of a statement
-    uint public constant MAX_STATEMENT_LENGTH = 120;
-    // Amount of credits a user is credited each "step"
-    uint public constant USER_CREDIT_ALLOWANCE_PER_STEP = 25;
-    // Starting credits for a new user, one week of allowance
-    uint public constant USER_STARTING_CREDITS = 1050;
-    // We only track this many statements for ranking purposes
-    uint public constant MAX_RANKED_STATEMENTS = 1000;
+    // Maximum length (in bytes) of a statement
+    uint public immutable maxStatementLength;
+    // Amount of credits a user is credited each credit allowance interval
+    uint public immutable userCreditAllowancePerInterval;
+    // Starting credits for a new user
+    uint public immutable userStartingCredits;
     // Minimum support required for a statement to be ranked
-    int public constant MIN_STATEMENT_SUPPORT_TO_RANK = 0;
-
-    // Configurable max ranked statements (defaults to MAX_RANKED_STATEMENTS)
+    int public immutable minStatementSupportToRank;
+    // We only track this many statements for ranking purposes
     uint public immutable maxRankedStatements;
+    // Duration of a single credit allowance interval in seconds
+    uint public immutable creditAllowanceIntervalSeconds;
+    // Minimum seconds between StatementEngaged events for the same statement
+    uint public immutable engagementWindowSeconds;
+    // Minimum seconds between support adjustments for the same user+statement
+    uint public immutable minAdjustmentIntervalSeconds;
+    // Credit multiplier (e.g. 10^6 for microcredits)
+    uint public immutable creditMultiplier;
+    // Refund penalty in basis points (e.g. 2000 = 20%)
+    uint public immutable refundPenaltyBps;
+    // Multiplier to speed up decay for testing (1 = normal, 2016 = 5-min half-life)
+    uint public immutable decaySpeedupFactor;
+    // Maximum statements a user can create in a burst (token-bucket capacity)
+    uint public immutable statementBurstCapacity;
+    // Seconds to regain one statement-creation token
+    uint public immutable statementRefillIntervalSeconds;
 
-    AOurVoiceRegistry public ourVoiceRegistry;
+    ASymvoliaRegistry public symvoliaRegistry;
+
+    struct ForumConfig {
+        uint maxRankedStatements;
+        uint creditAllowanceIntervalSeconds;
+        uint engagementWindowSeconds;
+        uint maxStatementLength;
+        uint userCreditAllowancePerInterval;
+        uint userStartingCredits;
+        int minStatementSupportToRank;
+        uint minAdjustmentIntervalSeconds;
+        uint creditMultiplier;
+        uint refundPenaltyBps;
+        uint decaySpeedupFactor;
+        uint statementBurstCapacity;
+        uint statementRefillIntervalSeconds;
+    }
+
+    enum SupportAdjustmentType {
+        Delta,
+        SetTo
+    }
 
     struct SupportAdjustment {
         uint statementId;
         int value;
+        SupportAdjustmentType adjustmentType;
     }
 
     struct StatementSupport {
@@ -52,6 +95,8 @@ contract Forum {
         uint createdTimestamp;
         Support support;
         int rank;
+        int peakRank; // best (lowest) rank ever achieved; -1 if never ranked
+        uint lastEngagementEventTimestamp;
     }
 
     struct Statement {
@@ -60,6 +105,7 @@ contract Forum {
         uint createdTimestamp;
         int support;
         int rank;
+        int peakRank;
     }
 
     // number of statements in the forum
@@ -82,21 +128,43 @@ contract Forum {
 
     mapping(bytes32 => UserBalance) public userCredits;
 
+    // Per-user statement-creation rate limiter (token bucket), keyed by the
+    // registered identity so it cannot be reset by switching linked addresses.
+    mapping(bytes32 => TokenBucket.Bucket) public statementBuckets;
+
     // Membership criteria
     string public nationality;
 
     event StatementAdded(uint indexed id, string statement);
+    event StatementRankChanged(
+        uint indexed statementId,
+        int previousRank,
+        int newRank
+    );
+    event StatementEngaged(uint indexed statementId);
 
     constructor(
-        AOurVoiceRegistry _ourVoiceRegistry,
+        ASymvoliaRegistry _symvoliaRegistry,
         string memory _nationality,
-        uint _maxRankedStatements
+        ForumConfig memory _config
     ) {
-        ourVoiceRegistry = _ourVoiceRegistry;
+        symvoliaRegistry = _symvoliaRegistry;
         nationality = _nationality;
-        maxRankedStatements = _maxRankedStatements == 0
-            ? MAX_RANKED_STATEMENTS
-            : _maxRankedStatements;
+        maxRankedStatements = _config.maxRankedStatements;
+        creditAllowanceIntervalSeconds = _config.creditAllowanceIntervalSeconds;
+        engagementWindowSeconds = _config.engagementWindowSeconds;
+        maxStatementLength = _config.maxStatementLength;
+        userCreditAllowancePerInterval = _config.userCreditAllowancePerInterval;
+        userStartingCredits = _config.userStartingCredits;
+        minStatementSupportToRank = _config.minStatementSupportToRank;
+        minAdjustmentIntervalSeconds = _config.minAdjustmentIntervalSeconds;
+        creditMultiplier = _config.creditMultiplier;
+        refundPenaltyBps = _config.refundPenaltyBps;
+        decaySpeedupFactor = _config.decaySpeedupFactor > 0
+            ? _config.decaySpeedupFactor
+            : 1;
+        statementBurstCapacity = _config.statementBurstCapacity;
+        statementRefillIntervalSeconds = _config.statementRefillIntervalSeconds;
     }
 
     function _resolveStatement(
@@ -111,7 +179,8 @@ contract Forum {
                 text: _statement.text,
                 createdTimestamp: _statement.createdTimestamp,
                 support: currentSupport,
-                rank: currentRank
+                rank: currentRank,
+                peakRank: _statement.peakRank
             });
     }
 
@@ -132,7 +201,13 @@ contract Forum {
         uint _start,
         uint _limit
     ) external view returns (Statement[] memory) {
-        if (_start > statementCount) revert StartOutOfBounds(_start, statementCount);
+        // A page starting at or past the end of the ranked list is not an
+        // error: return an empty page so callers can paginate to the tail
+        // without special-casing the boundary (and without reverting on a
+        // harmless view read).
+        if (_start >= rankedCount) {
+            return new Statement[](0);
+        }
 
         uint _length = _start + _limit <= rankedCount
             ? _limit
@@ -159,14 +234,19 @@ contract Forum {
         return stmts;
     }
 
+    /// @notice Returns the support a statement needs to enter the ranked list.
+    function getRankingThreshold() external view returns (int) {
+        return _getRankingThreshold();
+    }
+
     function isMember() public view returns (bool) {
-        if (!ourVoiceRegistry.isRegistered(msg.sender)) {
+        if (!symvoliaRegistry.isRegistered(msg.sender)) {
             return false;
         }
         if (bytes(nationality).length == 0) {
             return true;
         }
-        Registration memory registration = ourVoiceRegistry.getUserRegistration(
+        Registration memory registration = symvoliaRegistry.getUserRegistration(
             msg.sender
         );
         return StringUtils.equals(registration.nationality, nationality);
@@ -178,42 +258,45 @@ contract Forum {
     }
 
     function _rankingMaintenance() internal {
-        if (rankedCount == 0) {
-            return;
-        }
-        if (
+        while (
+            rankedCount > 0 &&
             _getCurrentSupportValue(
                 statements[statementRankings[rankedCount - 1]].support
-            ) < MIN_STATEMENT_SUPPORT_TO_RANK
+            ) <
+                minStatementSupportToRank
         ) {
-            // perform a binary search to find the new rankedCount
-            uint low = 0;
-            uint high = rankedCount - 1;
-            while (low < high) {
-                uint mid = (low + high) / 2;
-                if (
-                    _getCurrentSupportValue(
-                        statements[statementRankings[mid]].support
-                    ) < MIN_STATEMENT_SUPPORT_TO_RANK
-                ) {
-                    high = mid;
-                } else {
-                    low = mid + 1;
-                }
-            }
-            rankedCount = low;
+            rankedCount -= 1;
+            _setStatementRank(statementRankings[rankedCount], -1);
         }
     }
 
     function _getRankingThreshold() internal view returns (int) {
         if (rankedCount < maxRankedStatements) {
-            return MIN_STATEMENT_SUPPORT_TO_RANK;
+            return minStatementSupportToRank;
         }
         uint _lowestRankedStatementId = statementRankings[rankedCount - 1];
         return
             _getCurrentSupportValue(
                 statements[_lowestRankedStatementId].support
             ) + 1;
+    }
+
+    /// @dev Sets a statement's rank and updates peakRank if this is the best rank achieved.
+    ///      Emits StatementRankChanged when the effective rank actually changes.
+    function _setStatementRank(uint _statementId, int _rank) internal {
+        int previousRank = statements[_statementId].rank;
+        statements[_statementId].rank = _rank;
+
+        if (previousRank != _rank) {
+            emit StatementRankChanged(_statementId, previousRank, _rank);
+        }
+        if (
+            _rank >= 0 &&
+            (_rank < statements[_statementId].peakRank ||
+                statements[_statementId].peakRank == -1)
+        ) {
+            statements[_statementId].peakRank = _rank;
+        }
     }
 
     function _updateStatementRanking(uint _statementId) internal {
@@ -238,7 +321,7 @@ contract Forum {
             } else {
                 _rank = rankedCount - 1;
                 // Mark the evicted statement as unranked
-                statements[statementRankings[_rank]].rank = -1;
+                _setStatementRank(statementRankings[_rank], -1);
             }
 
             if (statementRankings.length == _rank) {
@@ -254,7 +337,7 @@ contract Forum {
                 )
         ) {
             statementRankings[_rank] = statementRankings[_rank - 1];
-            statements[statementRankings[_rank]].rank = int(_rank);
+            _setStatementRank(statementRankings[_rank], int(_rank));
             _rank -= 1;
         }
 
@@ -266,37 +349,154 @@ contract Forum {
                 )
         ) {
             statementRankings[_rank] = statementRankings[_rank + 1];
-            statements[statementRankings[_rank]].rank = int(_rank);
+            _setStatementRank(statementRankings[_rank], int(_rank));
             _rank += 1;
         }
 
+        // If the statement's support has fallen below the ranking threshold,
+        // unrank it and compact the array.
+        if (
+            _getCurrentSupportValue(statement.support) <
+            minStatementSupportToRank
+        ) {
+            rankedCount -= 1;
+            _setStatementRank(_statementId, -1);
+            return;
+        }
+
         statementRankings[_rank] = _statementId;
-        statements[_statementId].rank = int(_rank);
+        _setStatementRank(_statementId, int(_rank));
     }
 
-    function addStatement(string calldata _statementText) external onlyMembers {
-        if (bytes(_statementText).length > MAX_STATEMENT_LENGTH)
-            revert StatementTooLong(bytes(_statementText).length, MAX_STATEMENT_LENGTH);
+    function addStatement(
+        string calldata _statementText,
+        int _initialSupport
+    ) external onlyMembers returns (uint) {
+        if (bytes(_statementText).length == 0) revert EmptyStatement();
+        if (bytes(_statementText).length > maxStatementLength)
+            revert StatementTooLong(
+                bytes(_statementText).length,
+                maxStatementLength
+            );
 
-        // Ensure the statement is not empty
-        // check for duplicate statements if necessary
-        // may want to do some rate-limiting here
+        // Rate-limit statement creation per registered identity (token bucket).
+        // `onlyMembers` guarantees the caller is registered, and
+        // `getUserIdentifier` reverts otherwise.
+        bytes32 _userId = symvoliaRegistry.getUserIdentifier(msg.sender);
+        _consumeStatementToken(_userId);
+
         statements[statementCount] = StatementImpl({
             id: statementCount,
             text: _statementText,
             createdTimestamp: block.timestamp,
             support: Support({value: 0, lastUpdated: block.timestamp}),
-            rank: -1
+            rank: -1,
+            peakRank: -1,
+            lastEngagementEventTimestamp: 0
         });
+
+        // Bring the caller's credit balance current on every statement
+        // addition (not only when initial support is set) so that
+        // `userCredits[_userId].lastUpdated` always advances. Clients rely on
+        // that timestamp to detect that on-chain state changed for this user.
+        UserBalance storage _userBalance = userCredits[_userId];
+        _updateUserBalanceToBeCurrent(_userBalance);
+
+        if (_initialSupport != 0) {
+            // Apply initial support to statement and user support map
+            statements[statementCount].support.value = _initialSupport;
+            userSupportMap[_userId][statementCount] = Support({
+                value: _initialSupport,
+                lastUpdated: block.timestamp
+            });
+            _updateUserSupportedStatements(_userId, statementCount);
+
+            // Charge credits (old cost is 0 since this is a new statement)
+            uint _cost = _costOfUserSupport(_initialSupport);
+            if (_userBalance.credits < _cost)
+                revert InsufficientCredits(_userBalance.credits, int(_cost));
+            _userBalance.credits -= _cost;
+        }
+
         _updateStatementRanking(statementCount);
         emit StatementAdded(statementCount, _statementText);
+        uint _id = statementCount;
         statementCount++;
+        return _id;
+    }
+
+    /**
+     * @notice Spends one statement-creation token for `_userId`, reverting when
+     *         the user's token bucket is empty.
+     * @dev Brings the bucket current (refilling one token per
+     *      `statementRefillIntervalSeconds`, capped at `statementBurstCapacity`)
+     *      and persists the decremented state. See {TokenBucket}.
+     * @param _userId The registered identity spending the token.
+     */
+    function _consumeStatementToken(bytes32 _userId) private {
+        TokenBucket.Bucket storage _bucket = statementBuckets[_userId];
+        (uint _tokens, uint _lastRefill) = TokenBucket.refresh(
+            _bucket.tokens,
+            _bucket.lastRefill,
+            statementBurstCapacity,
+            statementRefillIntervalSeconds,
+            block.timestamp
+        );
+
+        if (_tokens == 0)
+            revert StatementRateLimited(
+                _lastRefill + statementRefillIntervalSeconds
+            );
+
+        _bucket.tokens = _tokens - 1;
+        _bucket.lastRefill = _lastRefill;
+    }
+
+    /**
+     * @notice The caller's current statement-creation allowance.
+     * @return available The number of statements the caller can create right
+     *         now (up to `statementBurstCapacity`).
+     * @return nextRefillTimestamp When the next token is regained, or 0 when the
+     *         bucket is already full.
+     */
+    function getStatementAllowance()
+        external
+        view
+        onlyMembers
+        returns (uint available, uint nextRefillTimestamp)
+    {
+        bytes32 _userId = symvoliaRegistry.getUserIdentifier(msg.sender);
+        TokenBucket.Bucket memory _bucket = statementBuckets[_userId];
+        (uint _tokens, uint _lastRefill) = TokenBucket.refresh(
+            _bucket.tokens,
+            _bucket.lastRefill,
+            statementBurstCapacity,
+            statementRefillIntervalSeconds,
+            block.timestamp
+        );
+        available = _tokens;
+        nextRefillTimestamp = _tokens >= statementBurstCapacity
+            ? 0
+            : _lastRefill + statementRefillIntervalSeconds;
     }
 
     function getUserBalance() external view onlyMembers returns (uint) {
-        bytes32 userId = ourVoiceRegistry.getUserIdentifier(msg.sender);
+        bytes32 userId = symvoliaRegistry.getUserIdentifier(msg.sender);
         UserBalance memory _balance = userCredits[userId];
         return _getCurrentUserBalance(_balance);
+    }
+
+    /**
+     * @notice Timestamp of the caller's most recent credit-affecting action.
+     * @dev Returns the raw stored `lastUpdated`, which is 0 until the user's
+     * first action and is then set to `block.timestamp` (strictly increasing)
+     * on every `addStatement` and `adjustSupport` via
+     * `_updateUserBalanceToBeCurrent`. Clients use it to detect that on-chain
+     * state changed for this user (e.g. to reconcile locally staged changes).
+     */
+    function getUserLastUpdated() external view onlyMembers returns (uint) {
+        bytes32 userId = symvoliaRegistry.getUserIdentifier(msg.sender);
+        return userCredits[userId].lastUpdated;
     }
 
     function getUserStatementSupport()
@@ -305,7 +505,7 @@ contract Forum {
         onlyMembers
         returns (StatementSupport[] memory)
     {
-        bytes32 userId = ourVoiceRegistry.getUserIdentifier(msg.sender);
+        bytes32 userId = symvoliaRegistry.getUserIdentifier(msg.sender);
 
         uint _numSupported = 0;
         for (uint i = 0; i < _userSupportedStatements[userId].length; i++) {
@@ -319,12 +519,13 @@ contract Forum {
         StatementSupport[] memory supportedStatements = new StatementSupport[](
             _numSupported
         );
+        uint j = 0;
         for (uint i = 0; i < _userSupportedStatements[userId].length; i++) {
             uint statementId = _userSupportedStatements[userId][i];
             Support storage support = userSupportMap[userId][statementId];
             int currentSupport = _getCurrentSupportValue(support);
             if (currentSupport != 0) {
-                supportedStatements[i] = StatementSupport({
+                supportedStatements[j++] = StatementSupport({
                     statementId: statementId,
                     support: currentSupport
                 });
@@ -333,22 +534,43 @@ contract Forum {
         return supportedStatements;
     }
 
+    // ======================================================================
+    // Decay and credit allowance
+    // ======================================================================
+
+    function _decayValue(
+        int startValue,
+        uint fromTimestamp,
+        uint toTimestamp
+    ) internal view returns (int) {
+        if (fromTimestamp > toTimestamp)
+            revert TimestampOrderInvalid(fromTimestamp, toTimestamp);
+
+        uint elapsedSeconds = (toTimestamp - fromTimestamp) *
+            decaySpeedupFactor;
+
+        if (startValue == 0 || elapsedSeconds == 0) {
+            return startValue;
+        }
+
+        return DecayUtils.approxDecay(startValue, elapsedSeconds);
+    }
+
     function _getCurrentUserBalance(
         UserBalance memory _balance
     ) internal view returns (uint) {
         if (_balance.lastUpdated == 0) {
-            _balance.credits = USER_STARTING_CREDITS;
-            _balance.lastUpdated = ourVoiceRegistry
+            _balance.credits = userStartingCredits;
+            _balance.lastUpdated = symvoliaRegistry
                 .getUserRegistration(msg.sender)
                 .registrationTimestamp;
         }
 
-        uint _elapsedSteps = DecayUtils.ellapsedStepsBetweenTimestamps(
-            _balance.lastUpdated,
-            block.timestamp
-        );
+        uint elapsedSeconds = block.timestamp - _balance.lastUpdated;
+        uint elapsedIntervals = elapsedSeconds / creditAllowanceIntervalSeconds;
         return
-            _balance.credits + (_elapsedSteps * USER_CREDIT_ALLOWANCE_PER_STEP);
+            _balance.credits +
+            (elapsedIntervals * userCreditAllowancePerInterval);
     }
 
     function _updateUserBalanceToBeCurrent(
@@ -362,15 +584,11 @@ contract Forum {
         Support memory _support
     ) internal view returns (int) {
         return
-            DecayUtils.decayValue(
-                _support.value,
-                _support.lastUpdated,
-                block.timestamp
-            );
+            _decayValue(_support.value, _support.lastUpdated, block.timestamp);
     }
 
     function _updateSupportToBeCurrent(Support storage _support) internal {
-        _support.value = DecayUtils.decayValue(
+        _support.value = _decayValue(
             _support.value,
             _support.lastUpdated,
             block.timestamp
@@ -378,11 +596,17 @@ contract Forum {
         _support.lastUpdated = block.timestamp;
     }
 
-    function _costOfUserSupport(int _userSupport) internal pure returns (uint) {
+    function _costOfUserSupport(int _userSupport) internal view returns (uint) {
         uint absSupport = uint(
             _userSupport >= 0 ? _userSupport : -_userSupport
         );
-        return (absSupport * (absSupport + 1)) / 2;
+        if (absSupport == 0) return 0;
+        uint _cost = (absSupport * (absSupport + creditMultiplier)) /
+            (2 * creditMultiplier);
+        // Clamp any nonzero support to a minimum of one credit part so the
+        // smallest support increment is never free (resolves L-2). Only
+        // absSupport == 1 floors to zero, so this changes exactly that input.
+        return _cost == 0 ? 1 : _cost;
     }
 
     function _updateUserSupportedStatements(
@@ -392,8 +616,12 @@ contract Forum {
         int _firstEmptySlot = -1;
         int _secondEmptySlot = -1;
         int _lastOccupiedSlot = -1;
+        bool _statementAlreadyTracked = false;
         for (uint i = 0; i < _userSupportedStatements[_userId].length; i++) {
             uint _currStatementId = _userSupportedStatements[_userId][i];
+            if (_currStatementId == _statementId) {
+                _statementAlreadyTracked = true;
+            }
             if (
                 _getCurrentSupportValue(
                     userSupportMap[_userId][_currStatementId]
@@ -409,13 +637,18 @@ contract Forum {
             }
         }
 
-        if (_firstEmptySlot == -1) {
-            // no empty slots, just append
-            _userSupportedStatements[_userId].push(_statementId);
-        } else {
-            _userSupportedStatements[_userId][
-                uint(_firstEmptySlot)
-            ] = _statementId;
+        if (
+            !_statementAlreadyTracked &&
+            _getCurrentSupportValue(userSupportMap[_userId][_statementId]) != 0
+        ) {
+            if (_firstEmptySlot == -1) {
+                // no empty slots, just append
+                _userSupportedStatements[_userId].push(_statementId);
+            } else {
+                _userSupportedStatements[_userId][
+                    uint(_firstEmptySlot)
+                ] = _statementId;
+            }
         }
 
         if (
@@ -433,8 +666,9 @@ contract Forum {
     function adjustSupport(
         SupportAdjustment[] calldata _supportAdjustments
     ) external onlyMembers {
-        if (!ourVoiceRegistry.isRegistered(msg.sender)) revert UserNotRegistered(msg.sender);
-        bytes32 _userId = ourVoiceRegistry.getUserIdentifier(msg.sender);
+        if (!symvoliaRegistry.isRegistered(msg.sender))
+            revert UserNotRegistered(msg.sender);
+        bytes32 _userId = symvoliaRegistry.getUserIdentifier(msg.sender);
 
         UserBalance storage _userBalance = userCredits[_userId];
         _updateUserBalanceToBeCurrent(_userBalance);
@@ -452,21 +686,52 @@ contract Forum {
             Support storage _currentUserSupport = userSupportMap[_userId][
                 _adjustment.statementId
             ];
+
+            // Prevent rapid-fire adjustments to the same statement
+            if (
+                block.timestamp - _currentUserSupport.lastUpdated <
+                minAdjustmentIntervalSeconds
+            ) revert DuplicateAdjustment(_adjustment.statementId);
+
             _updateSupportToBeCurrent(_currentStatementSupport);
             _updateSupportToBeCurrent(_currentUserSupport);
 
-            uint _oldCost = _costOfUserSupport(_currentUserSupport.value);
-            uint _newCost = _costOfUserSupport(
-                _currentUserSupport.value + _adjustment.value
-            );
+            int _oldSupport = _currentUserSupport.value;
+            int _newSupport = _adjustment.adjustmentType ==
+                SupportAdjustmentType.SetTo
+                ? _adjustment.value
+                : _oldSupport + _adjustment.value;
+            int _supportChange = _newSupport - _oldSupport;
+
+            uint _oldCost = _costOfUserSupport(_oldSupport);
+            uint _newCost = _costOfUserSupport(_newSupport);
             _totalCostChange += int(_newCost) - int(_oldCost);
 
-            _currentStatementSupport.value += _adjustment.value;
-            _currentUserSupport.value += _adjustment.value;
+            _currentStatementSupport.value += _supportChange;
+            _currentUserSupport.value = _newSupport;
 
             _updateUserSupportedStatements(_userId, _adjustment.statementId);
 
             _updateStatementRanking(_adjustment.statementId);
+
+            // Emit engagement event if enough time has passed since the last one
+            if (
+                block.timestamp >=
+                statements[_adjustment.statementId]
+                    .lastEngagementEventTimestamp +
+                    engagementWindowSeconds
+            ) {
+                statements[_adjustment.statementId]
+                    .lastEngagementEventTimestamp = block.timestamp;
+                emit StatementEngaged(_adjustment.statementId);
+            }
+        }
+
+        // Apply refund penalty when net cost change is negative (user receives credits back)
+        if (_totalCostChange < 0) {
+            uint _refund = uint(-_totalCostChange);
+            uint _penalty = (_refund * refundPenaltyBps) / 10000;
+            _totalCostChange = -int(_refund - _penalty);
         }
 
         if (int(_userBalance.credits) < _totalCostChange)
@@ -475,6 +740,4 @@ contract Forum {
             int(_userBalance.credits) - _totalCostChange
         );
     }
-
-    fallback() external {}
 }

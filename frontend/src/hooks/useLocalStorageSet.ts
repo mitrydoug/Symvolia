@@ -1,9 +1,56 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useForum } from "../state/Forum";
+import { useWalletAuth } from "@/wallet";
+
+/**
+ * Custom event name used to synchronise localStorage-set writes
+ * across hook instances within the **same** tab. The native `storage`
+ * event only fires in *other* tabs, so we dispatch this on `window`
+ * whenever a value is written.
+ */
+const LS_SET_SYNC_EVENT = "symvolia:ls-set-sync";
+
+/** Notify every subscriber in this tab that a key changed. */
+const emitSync = (key: string) => {
+  window.dispatchEvent(new CustomEvent(LS_SET_SYNC_EVENT, { detail: key }));
+};
+
+/** Read a Set<number> from localStorage (returns empty set on any error). */
+const readSet = (storageKey: string): Set<number> => {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) return new Set(JSON.parse(raw) as number[]);
+  } catch {
+    // localStorage unavailable or data corrupted
+  }
+  return new Set();
+};
+
+/** Write a Set<number> to localStorage and notify same-tab listeners. */
+const writeSet = (storageKey: string, set: Set<number>): void => {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify([...set]));
+  } catch {
+    // quota exceeded or localStorage unavailable
+  }
+  emitSync(storageKey);
+};
 
 /**
  * A hook that manages a Set<number> backed by localStorage.
- * The data is scoped per forum so each forum has its own set.
+ *
+ * Uses `useSyncExternalStore` so that **all** component instances sharing
+ * the same key stay in sync — both across tabs (via the native `storage`
+ * event) and within the same tab (via a lightweight custom event).
+ *
+ * The storage key is scoped by:
+ *   - forum name  — each forum has its own set
+ *   - chain fingerprint  — derived from the genesis block hash so data is
+ *     automatically invalidated whenever the chain is reset
+ *   - wallet address  — per-user data stays private to each account
+ *
+ * Returns empty data (no reads/writes) until the chain fingerprint has been
+ * resolved, preventing any stale-deployment data from leaking through.
  */
 const useLocalStorageSet = (
   key: string,
@@ -14,86 +61,98 @@ const useLocalStorageSet = (
   remove: (id: number) => void;
   toggle: (id: number) => void;
 } => {
-  const { name: forumName } = useForum();
-  const storageKey = `ourvoice:${key}:${forumName}`;
+  const { name: forumName, chainFingerprint } = useForum();
+  const { address } = useWalletAuth();
 
-  const [set, setSet] = useState<Set<number>>(() => {
-    try {
-      const stored = localStorage.getItem(storageKey);
-      if (stored) {
-        return new Set(JSON.parse(stored) as number[]);
-      }
-    } catch {
-      // localStorage might be unavailable or data corrupted
-    }
-    return new Set();
-  });
+  // Shorten address to first 4 bytes (10 chars inc. "0x") for a compact key.
+  const addrKey = address ? address.slice(0, 10) : "anon";
 
-  // Re-read from localStorage when the forum changes
-  useEffect(() => {
+  // storageKey is undefined while the chain fingerprint is loading — hooks
+  // that depend on it will return empty data during that window.
+  const storageKey =
+    chainFingerprint !== undefined
+      ? `symvolia:${key}:${chainFingerprint}:${forumName}:${addrKey}`
+      : undefined;
+
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      // Same-tab writes from other hook instances
+      const handleSync = (e: Event) => {
+        if ((e as CustomEvent).detail === storageKey) onStoreChange();
+      };
+      // Cross-tab writes
+      const handleStorage = (e: StorageEvent) => {
+        if (e.key === storageKey) onStoreChange();
+      };
+      window.addEventListener(LS_SET_SYNC_EVENT, handleSync);
+      window.addEventListener("storage", handleStorage);
+      return () => {
+        window.removeEventListener(LS_SET_SYNC_EVENT, handleSync);
+        window.removeEventListener("storage", handleStorage);
+      };
+    },
+    [storageKey],
+  );
+
+  const getSnapshot = useCallback((): string => {
+    if (!storageKey) return "[]";
     try {
-      const stored = localStorage.getItem(storageKey);
-      if (stored) {
-        setSet(new Set(JSON.parse(stored) as number[]));
-      } else {
-        setSet(new Set());
-      }
+      return localStorage.getItem(storageKey) ?? "[]";
     } catch {
-      setSet(new Set());
+      return "[]";
     }
   }, [storageKey]);
 
-  // Persist to localStorage whenever the set changes
-  useEffect(() => {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify([...set]));
-    } catch {
-      // Silently fail if localStorage is unavailable or quota exceeded
-    }
-  }, [set, storageKey]);
+  const raw = useSyncExternalStore(subscribe, getSnapshot, () => "[]");
 
-  const has = useCallback((id: number) => set.has(id), [set]);
+  // Deserialise and build values array only when the snapshot changes.
+  const values: number[] = useMemo(() => {
+    try {
+      return JSON.parse(raw) as number[];
+    } catch {
+      return [];
+    }
+  }, [raw]);
+
+  const valuesSet = useMemo(() => new Set(values), [values]);
+
+  const has = useCallback((id: number) => valuesSet.has(id), [valuesSet]);
 
   const add = useCallback(
     (id: number) => {
-      setSet((prev) => {
-        if (prev.has(id)) return prev;
-        const next = new Set(prev);
-        next.add(id);
-        return next;
-      });
+      if (!storageKey) return;
+      const current = readSet(storageKey);
+      if (current.has(id)) return;
+      current.add(id);
+      writeSet(storageKey, current);
     },
-    [setSet],
+    [storageKey],
   );
 
   const remove = useCallback(
     (id: number) => {
-      setSet((prev) => {
-        if (!prev.has(id)) return prev;
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
+      if (!storageKey) return;
+      const current = readSet(storageKey);
+      if (!current.has(id)) return;
+      current.delete(id);
+      writeSet(storageKey, current);
     },
-    [setSet],
+    [storageKey],
   );
 
   const toggle = useCallback(
     (id: number) => {
-      setSet((prev) => {
-        const next = new Set(prev);
-        if (next.has(id)) {
-          next.delete(id);
-        } else {
-          next.add(id);
-        }
-        return next;
-      });
+      if (!storageKey) return;
+      const current = readSet(storageKey);
+      if (current.has(id)) {
+        current.delete(id);
+      } else {
+        current.add(id);
+      }
+      writeSet(storageKey, current);
     },
-    [setSet],
+    [storageKey],
   );
-
-  const values = [...set];
 
   return { values, has, add, remove, toggle };
 };

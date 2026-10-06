@@ -1,0 +1,10 @@
+# Local development — stress-test fixture (dev registry, USA forum).
+# Launched via: make local-stress-test
+#
+# Meilisearch runs in Docker under Overmind. Everything else runs natively.
+
+meilisearch: bash scripts/dev/meilisearch.sh local-stress-test
+hardhat: bash scripts/dev/hardhat.sh local-stress-test
+contracts: bash scripts/dev/contracts.sh local-stress-test
+frontend: bash scripts/dev/frontend.sh local-stress-test
+backend: bash scripts/dev/backend.sh local-stress-test

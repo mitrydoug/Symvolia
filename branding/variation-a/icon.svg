@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Symvoli — Mosaic Ring</title>
+  <desc>Six arc segments forming a ring — many contributions, one whole.</desc>
+  <path d="M 34.30,10.12 A 22,22 0 0,1 49.80,19.07" fill="none" stroke="#0E2A4F" stroke-width="9" stroke-linecap="round"/>
+  <path d="M 52.10,23.05 A 22,22 0 0,1 52.10,40.95" fill="none" stroke="#1A3C6E" stroke-width="9" stroke-linecap="round"/>
+  <path d="M 49.80,44.93 A 22,22 0 0,1 34.30,53.88" fill="none" stroke="#2E6B8A" stroke-width="9" stroke-linecap="round"/>
+  <path d="M 29.70,53.88 A 22,22 0 0,1 14.20,44.93" fill="none" stroke="#7A6242" stroke-width="9" stroke-linecap="round"/>
+  <path d="M 11.90,40.95 A 22,22 0 0,1 11.90,23.05" fill="none" stroke="#C4713B" stroke-width="9" stroke-linecap="round"/>
+  <path d="M 14.20,19.07 A 22,22 0 0,1 29.70,10.12" fill="none" stroke="#D89860" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="32.0" cy="32.0" r="3.1" fill="#1A3C6E"/>
+</svg>

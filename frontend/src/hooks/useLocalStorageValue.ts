@@ -6,7 +6,7 @@ import { useCallback, useSyncExternalStore } from "react";
  * only fires in *other* tabs, so we dispatch this event on `window`
  * whenever a value is written.
  */
-const LOCAL_STORAGE_SYNC_EVENT = "ourvoice:local-storage-sync";
+const LOCAL_STORAGE_SYNC_EVENT = "symvolia:local-storage-sync";
 
 /** Notify every subscriber in this tab that a key changed. */
 const emitSync = (key: string) => {

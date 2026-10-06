@@ -8,11 +8,13 @@ import reactHooks from "eslint-plugin-react-hooks";
 
 export default defineConfig([
   {
+    ignores: ["dist/", "node_modules/", "scripts/"],
+  },
+  {
     files: ["**/*.ts", "**/*.tsx"],
-    ignores: ["dist/", "node_modules/"],
     extends: [
       eslint.configs.recommended,
-      ...tseslint.configs.recommended,
+      ...tseslint.configs.recommendedTypeChecked,
       react.configs.flat.recommended,
       react.configs.flat["jsx-runtime"],
       reactHooks.configs["recommended-latest"],
@@ -23,6 +25,8 @@ export default defineConfig([
       parserOptions: {
         ecmaVersion: 2025,
         sourceType: "module",
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
         ecmaFeatures: {
           jsx: true,
         },
@@ -35,6 +39,9 @@ export default defineConfig([
       react: {
         version: "detect",
       },
+    },
+    rules: {
+      "@typescript-eslint/no-deprecated": "error",
     },
   },
 ]);

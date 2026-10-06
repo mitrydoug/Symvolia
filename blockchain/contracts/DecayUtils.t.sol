@@ -7,112 +7,60 @@ import {console} from "forge-std/console.sol";
 import {DecayUtils} from "./DecayUtils.sol";
 
 contract DecayUtilsTest is Test {
-    function testEllapsedStepsBetweenTimestamps(
-        uint64 _arbitraryTimestamp
-    ) external pure {
-        assertEq(
-            DecayUtils.ellapsedStepsBetweenTimestamps(
-                _arbitraryTimestamp,
-                _arbitraryTimestamp
-            ),
-            0,
-            "ellapsed steps between arbitrary timestamp and itself should be 0"
-        );
-        assertEq(
-            DecayUtils.ellapsedStepsBetweenTimestamps(
-                _arbitraryTimestamp,
-                _arbitraryTimestamp + DecayUtils.STEP_DURATION_SECONDS
-            ),
-            1,
-            "ellapsed steps between arbitrary timestamps differing by step duration should be 1"
-        );
+    uint constant HALF_LIFE = 604800; // 1 week in seconds
 
-        uint256 _stepStart = (_arbitraryTimestamp -
-            (_arbitraryTimestamp % DecayUtils.STEP_DURATION_SECONDS));
-
-        assertEq(
-            DecayUtils.ellapsedStepsBetweenTimestamps(
-                _stepStart,
-                _arbitraryTimestamp
-            ),
-            0,
-            "ellapsed steps between arbitrary timestamp and its step start should be 0"
-        );
-        assertEq(
-            DecayUtils.ellapsedStepsBetweenTimestamps(
-                _arbitraryTimestamp,
-                _stepStart + DecayUtils.STEP_DURATION_SECONDS
-            ),
-            1,
-            "ellapsed steps between arbitrary timestamp and the next step start should be 1"
-        );
-    }
-
-    function test_approxDecayHalvingEvery42Steps() external pure {
+    function test_approxDecay() external pure {
         int _initialValue = 1000000000000; // 1 trillion
 
         assertEq(
-            DecayUtils.approxDecayHalvingEvery42Steps(_initialValue, 0),
+            DecayUtils.approxDecay(_initialValue, 0),
             _initialValue,
-            "0 steps should return initial value"
+            "0 seconds should return initial value"
         );
         assertEq(
-            DecayUtils.approxDecayHalvingEvery42Steps(_initialValue, 42),
+            DecayUtils.approxDecay(_initialValue, HALF_LIFE),
             _initialValue / 2,
-            "42 steps should halve initial value"
+            "1 half-life should halve initial value"
         );
         assertEq(
-            DecayUtils.approxDecayHalvingEvery42Steps(_initialValue, 84),
+            DecayUtils.approxDecay(_initialValue, HALF_LIFE * 2),
             _initialValue / 4,
-            "84 steps should quarter initial value"
+            "2 half-lives should quarter initial value"
         );
         assertEq(
-            DecayUtils.approxDecayHalvingEvery42Steps(_initialValue, 42 * 39),
+            DecayUtils.approxDecay(_initialValue, HALF_LIFE * 39),
             1,
             "39 halvings should bring 1e12 to 1"
         );
         assertEq(
-            DecayUtils.approxDecayHalvingEvery42Steps(_initialValue, 42 * 40),
+            DecayUtils.approxDecay(_initialValue, HALF_LIFE * 40),
             0,
             "40 halvings should bring 1e12 to 0"
         );
 
+        // Verify monotonic decay over the first half-life, sampling every ~60480 seconds
         int _last = _initialValue;
-        for (uint i = 1; i <= 42; i++) {
-            int _decayedValue = DecayUtils.approxDecayHalvingEvery42Steps(
+        uint _sampleInterval = HALF_LIFE / 10;
+        for (uint i = 1; i <= 10; i++) {
+            int _decayedValue = DecayUtils.approxDecay(
                 _initialValue,
-                i
+                i * _sampleInterval
             );
             assertLt(
                 _decayedValue,
                 _last,
-                "decayed value should not increase over steps"
+                "decayed value should not increase over time"
             );
-            if (_last >= 10000) {
-                assertEq(
-                    (_decayedValue * 1000) / _last,
-                    983,
-                    "value should decay at approx 1.7% per step"
-                );
-            }
             _last = _decayedValue;
         }
     }
 
-    function test_approxDecayHalvingEvery42StepsNegative(
-        uint64 _initialValue
-    ) external pure {
+    function test_approxDecayNegative(uint64 _initialValue) external pure {
         int _value = int(uint256(_initialValue));
         int _negativeValue = -_value;
 
-        int _decayedValue = DecayUtils.approxDecayHalvingEvery42Steps(
-            _value,
-            1
-        );
-        int _decayedNegativeValue = DecayUtils.approxDecayHalvingEvery42Steps(
-            _negativeValue,
-            1
-        );
+        int _decayedValue = DecayUtils.approxDecay(_value, 1);
+        int _decayedNegativeValue = DecayUtils.approxDecay(_negativeValue, 1);
         assertEq(
             _decayedValue,
             -_decayedNegativeValue,
@@ -122,6 +70,16 @@ contract DecayUtilsTest is Test {
             _decayedNegativeValue,
             _negativeValue,
             "negative value should decay towards zero"
+        );
+    }
+
+    function test_singleSecondDecay() external pure {
+        int _initialValue = 1000000000000; // Large enough to observe decay over 1 second
+        int _decayedValue = DecayUtils.approxDecay(_initialValue, 1);
+        assertLt(
+            _decayedValue,
+            _initialValue,
+            "decayed value should be less than initial value after 1 second"
         );
     }
 }

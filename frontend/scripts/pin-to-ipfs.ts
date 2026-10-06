@@ -61,7 +61,7 @@ console.log(`Uploading ${files.length} files from ${distDir}…`);
 
 const result = await pinata.upload.public
   .fileArray(files)
-  .name("ourvoice-frontend");
+  .name("symvolia-frontend");
 
 console.log(`Pinned to IPFS with CID: ${result.cid}`);
 console.log(`Gateway URL: https://${PINATA_GATEWAY}/ipfs/${result.cid}`);

@@ -2,24 +2,24 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {console} from "forge-std/console.sol";
 
 import {Forum} from "./Forum.sol";
-import {MockOurVoiceRegistry} from "./MockOurVoiceRegistry.sol";
-import {AOurVoiceRegistry} from "./IOurVoiceRegistry.sol";
-import {DecayUtils} from "./DecayUtils.sol";
+import {DevSymvoliaRegistry} from "./DevSymvoliaRegistry.sol";
+import {ASymvoliaRegistry} from "./ISymvoliaRegistry.sol";
 
 // Test harness to expose internal methods for testing
 contract ForumHarness is Forum {
     constructor(
-        AOurVoiceRegistry _ourVoiceRegistry,
+        ASymvoliaRegistry _symvoliaRegistry,
         string memory _nationality,
-        uint _maxRankedStatements
-    ) Forum(_ourVoiceRegistry, _nationality, _maxRankedStatements) {}
+        Forum.ForumConfig memory _config
+    ) Forum(_symvoliaRegistry, _nationality, _config) {}
 
     function exposed_costOfUserSupport(
         int _userSupport
-    ) external pure returns (uint) {
+    ) external view returns (uint) {
         return _costOfUserSupport(_userSupport);
     }
 
@@ -31,15 +31,42 @@ contract ForumHarness is Forum {
 }
 
 contract ForumTest is Test {
-    uint MOCK_TEST_TIMESTAMP = 1767572846;
-
-    MockOurVoiceRegistry mockRegistry;
+    uint constant MOCK_TEST_TIMESTAMP = 1767572100;
+    uint constant CREDIT_ALLOWANCE_INTERVAL_SECONDS = 60;
+    uint constant HALF_LIFE = 604800; // 1 week in seconds
+    uint constant ONE_PERCENT_DECAY_SECONDS = 8770;
+    DevSymvoliaRegistry mockRegistry;
     ForumHarness forum;
 
     function setUp() public {
         vm.warp(MOCK_TEST_TIMESTAMP);
-        mockRegistry = new MockOurVoiceRegistry();
-        forum = new ForumHarness(mockRegistry, "", 0);
+
+        mockRegistry = new DevSymvoliaRegistry();
+        forum = new ForumHarness(
+            mockRegistry,
+            "",
+            Forum.ForumConfig({
+                maxRankedStatements: 3,
+                creditAllowanceIntervalSeconds: CREDIT_ALLOWANCE_INTERVAL_SECONDS,
+                engagementWindowSeconds: 60,
+                maxStatementLength: 120,
+                userCreditAllowancePerInterval: 25,
+                userStartingCredits: 1000,
+                minStatementSupportToRank: 2,
+                minAdjustmentIntervalSeconds: 12,
+                creditMultiplier: 1,
+                refundPenaltyBps: 0,
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: 1000,
+                statementRefillIntervalSeconds: 60
+            })
+        );
+    }
+
+    /// @dev Advance block.timestamp by minAdjustmentIntervalSeconds to avoid
+    ///      DuplicateAdjustment reverts when adjusting the same statement.
+    function _nextBlock() internal {
+        vm.warp(block.timestamp + forum.minAdjustmentIntervalSeconds());
     }
 
     modifier registeredMember() {
@@ -50,21 +77,54 @@ contract ForumTest is Test {
     function _getStatementById(
         uint _statementId
     ) internal view returns (Forum.Statement memory) {
-        uint[] memory statementIds = new uint[](1);
-        statementIds[0] = _statementId;
+        uint[] memory statementIds = _oneId(_statementId);
         Forum.Statement[] memory statements = forum.getStatementsById(
             statementIds
         );
         return statements[0];
     }
 
+    function _oneId(uint _statementId) internal pure returns (uint[] memory) {
+        uint[] memory statementIds = new uint[](1);
+        statementIds[0] = _statementId;
+        return statementIds;
+    }
+
+    function _deltaSupportAdjustment(
+        uint _statementId,
+        int _value
+    ) internal pure returns (Forum.SupportAdjustment memory) {
+        return
+            Forum.SupportAdjustment({
+                statementId: _statementId,
+                value: _value,
+                adjustmentType: Forum.SupportAdjustmentType.Delta
+            });
+    }
+
+    function _setToSupportAdjustment(
+        uint _statementId,
+        int _value
+    ) internal pure returns (Forum.SupportAdjustment memory) {
+        return
+            Forum.SupportAdjustment({
+                statementId: _statementId,
+                value: _value,
+                adjustmentType: Forum.SupportAdjustmentType.SetTo
+            });
+    }
+
     function _addStatementSupport(uint _statementId, int _value) internal {
         Forum.SupportAdjustment[]
             memory adjustments = new Forum.SupportAdjustment[](1);
-        adjustments[0] = Forum.SupportAdjustment({
-            statementId: _statementId,
-            value: _value
-        });
+        adjustments[0] = _deltaSupportAdjustment(_statementId, _value);
+        forum.adjustSupport(adjustments);
+    }
+
+    function _setStatementSupport(uint _statementId, int _value) internal {
+        Forum.SupportAdjustment[]
+            memory adjustments = new Forum.SupportAdjustment[](1);
+        adjustments[0] = _setToSupportAdjustment(_statementId, _value);
         forum.adjustSupport(adjustments);
     }
 
@@ -84,31 +144,90 @@ contract ForumTest is Test {
 
     function testInitialUserBalance() external registeredMember {
         uint balance = forum.getUserBalance();
-        // TODO: fix my constants management
-        assertEq(balance, 1050, "Initial user balance should be 1050 credits");
+        assertEq(
+            balance,
+            1000,
+            "Initial user balance should match userStartingCredits"
+        );
+    }
+
+    function testGetUserLastUpdatedTracksActions() external registeredMember {
+        // No credit-affecting action yet: raw stored lastUpdated is 0.
+        assertEq(
+            forum.getUserLastUpdated(),
+            0,
+            "lastUpdated should be 0 before any action"
+        );
+
+        // Adding a statement with initial support bumps lastUpdated.
+        forum.addStatement("Hello, world!", 1);
+        uint afterAdd = forum.getUserLastUpdated();
+        assertEq(
+            afterAdd,
+            block.timestamp,
+            "lastUpdated should equal block.timestamp after addStatement"
+        );
+        assertGt(afterAdd, 0, "lastUpdated should be non-zero after an action");
+
+        // Adjusting support on a later block advances lastUpdated again.
+        _nextBlock();
+        _addStatementSupport(0, 1);
+        assertEq(
+            forum.getUserLastUpdated(),
+            block.timestamp,
+            "lastUpdated should equal block.timestamp after adjustSupport"
+        );
+        assertGt(
+            forum.getUserLastUpdated(),
+            afterAdd,
+            "lastUpdated should strictly increase across actions"
+        );
+    }
+
+    function testGetUserLastUpdatedBumpsOnZeroSupportStatement()
+        external
+        registeredMember
+    {
+        assertEq(
+            forum.getUserLastUpdated(),
+            0,
+            "lastUpdated should be 0 before any action"
+        );
+
+        // Adding a statement with zero initial support must still advance
+        // lastUpdated so clients can detect the on-chain change.
+        forum.addStatement("No initial support", 0);
+        assertEq(
+            forum.getUserLastUpdated(),
+            block.timestamp,
+            "lastUpdated should advance after a zero-support statement add"
+        );
     }
 
     function testUserBalanceAllowance() external registeredMember {
         uint initialBalance = forum.getUserBalance();
-        // TODO: assumes step length
-        vm.warp(vm.getBlockTimestamp() + DecayUtils.STEP_DURATION_SECONDS);
+        vm.warp(
+            vm.getBlockTimestamp() + forum.creditAllowanceIntervalSeconds()
+        );
         uint newBalance = forum.getUserBalance();
         assertEq(
             newBalance,
             initialBalance + 25,
-            "User balance should increase by 25 credits after one step"
+            "User balance should increase by 25 credits after one interval"
         );
-        vm.warp(vm.getBlockTimestamp() + 5 * DecayUtils.STEP_DURATION_SECONDS);
+        vm.warp(
+            vm.getBlockTimestamp() + 5 * forum.creditAllowanceIntervalSeconds()
+        );
         newBalance = forum.getUserBalance();
         assertEq(
             newBalance,
             initialBalance + 150,
-            "User balance should increase by 150 credits after 6 steps (1 day if step is 4 hours)"
+            "User balance should increase by 150 credits after 6 intervals"
         );
     }
 
     function testAddStatement() external registeredMember {
-        forum.addStatement("Hello, world!");
+        forum.addStatement("Hello, world!", 0);
         assertEq(
             forum.statementCount(),
             1,
@@ -126,11 +245,108 @@ contract ForumTest is Test {
     }
 
     function testAddStatementSupport() external registeredMember {
-        forum.addStatement("Hello, world!");
+        forum.addStatement("Hello, world!", 0);
         _addStatementSupport(0, 1);
 
         Forum.Statement memory statement = _getStatementById(0);
         assertEq(statement.support, 1, "Support should be incremented to 1");
+    }
+
+    function testSetToSupportAdjustmentSetsExactSupport()
+        external
+        registeredMember
+    {
+        forum.addStatement("SetTo statement", 0);
+        _addStatementSupport(0, 5); // Cost: 15
+
+        _nextBlock();
+        _setStatementSupport(0, 2); // New cost: 3, refund: 12
+
+        Forum.Statement memory statement = _getStatementById(0);
+        assertEq(statement.support, 2, "Support should be set to 2");
+        assertEq(
+            forum.getUserBalance(),
+            997,
+            "Balance should reflect the target support cost"
+        );
+    }
+
+    function testSetToZeroClearsSupportInBatch() external registeredMember {
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        _addStatementSupport(0, 5); // Cost: 15
+        _addStatementSupport(1, 1); // Cost: 1
+
+        _nextBlock();
+        Forum.SupportAdjustment[]
+            memory adjustments = new Forum.SupportAdjustment[](2);
+        adjustments[0] = _setToSupportAdjustment(0, 0); // Refund: 15
+        adjustments[1] = _deltaSupportAdjustment(1, 2); // Additional cost: 5
+        forum.adjustSupport(adjustments);
+
+        assertEq(_getStatementById(0).support, 0, "Statement A is cleared");
+        assertEq(_getStatementById(1).support, 3, "Statement B is updated");
+        assertEq(
+            forum.getUserBalance(),
+            994,
+            "Net batch refund should be applied across SetTo and Delta"
+        );
+
+        Forum.StatementSupport[] memory userSupport = forum
+            .getUserStatementSupport();
+        assertEq(userSupport.length, 1, "Cleared support should be hidden");
+        assertEq(userSupport[0].statementId, 1, "Statement B should remain");
+    }
+
+    function testSetToZeroClearsFractionalSupportParts()
+        external
+        registeredMember
+    {
+        ForumHarness fractionalForum = new ForumHarness(
+            mockRegistry,
+            "",
+            Forum.ForumConfig({
+                maxRankedStatements: 3,
+                creditAllowanceIntervalSeconds: CREDIT_ALLOWANCE_INTERVAL_SECONDS,
+                engagementWindowSeconds: 60,
+                maxStatementLength: 120,
+                userCreditAllowancePerInterval: 25 * 100,
+                userStartingCredits: 1000 * 100,
+                minStatementSupportToRank: 2 * 100,
+                minAdjustmentIntervalSeconds: 12,
+                creditMultiplier: 100,
+                refundPenaltyBps: 0,
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: 1000,
+                statementRefillIntervalSeconds: 60
+            })
+        );
+
+        fractionalForum.addStatement("Fractional support", 1);
+        vm.warp(
+            block.timestamp + fractionalForum.minAdjustmentIntervalSeconds()
+        );
+
+        Forum.SupportAdjustment[]
+            memory adjustments = new Forum.SupportAdjustment[](1);
+        adjustments[0] = _setToSupportAdjustment(0, 0);
+        fractionalForum.adjustSupport(adjustments);
+
+        uint[] memory statementIds = new uint[](1);
+        statementIds[0] = 0;
+        Forum.Statement[] memory statements = fractionalForum.getStatementsById(
+            statementIds
+        );
+        assertEq(
+            statements[0].support,
+            0,
+            "Fractional support part should clear exactly"
+        );
+        assertEq(
+            fractionalForum.getUserStatementSupport().length,
+            0,
+            "No fractional support should remain visible"
+        );
     }
 
     // ======================================================================
@@ -138,7 +354,7 @@ contract ForumTest is Test {
     // ======================================================================
 
     function testSupportOfOneDoesNotCauseRanking() external registeredMember {
-        forum.addStatement("Test statement");
+        forum.addStatement("Test statement", 0);
         _addStatementSupport(0, 1);
 
         Forum.Statement memory statement = _getStatementById(0);
@@ -151,7 +367,7 @@ contract ForumTest is Test {
         external
         registeredMember
     {
-        forum.addStatement("Test statement");
+        forum.addStatement("Test statement", 0);
         _addStatementSupport(0, 2);
 
         Forum.Statement memory statement = _getStatementById(0);
@@ -160,13 +376,50 @@ contract ForumTest is Test {
         assertEq(forum.rankedCount(), 1, "Ranked count should be 1");
     }
 
+    function testRankingThresholdReturnsMinimumSupportWhenRankingHasRoom()
+        external
+        registeredMember
+    {
+        forum.addStatement("Statement A", 0);
+        _addStatementSupport(0, 2);
+
+        assertEq(
+            forum.getRankingThreshold(),
+            forum.minStatementSupportToRank(),
+            "Threshold should be minimum support while ranking has room"
+        );
+    }
+
+    function testRankingThresholdReturnsLowestRankedSupportPlusOneWhenFull()
+        external
+        registeredMember
+    {
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        forum.addStatement("Statement C", 0);
+
+        Forum.SupportAdjustment[]
+            memory adjustments = new Forum.SupportAdjustment[](3);
+        adjustments[0] = _deltaSupportAdjustment(0, 5);
+        adjustments[1] = _deltaSupportAdjustment(1, 4);
+        adjustments[2] = _deltaSupportAdjustment(2, 3);
+        forum.adjustSupport(adjustments);
+
+        assertEq(forum.rankedCount(), 3, "Ranking should be full");
+        assertEq(
+            forum.getRankingThreshold(),
+            4,
+            "Threshold should exceed the lowest ranked support"
+        );
+    }
+
     function testRankedStatementRankChangesWithMoreSupport()
         external
         registeredMember
     {
         // Create and rank two statements
-        forum.addStatement("Statement A");
-        forum.addStatement("Statement B");
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
         _addStatementSupport(0, 3); // Rank 0
         _addStatementSupport(1, 2); // Rank 1
 
@@ -175,6 +428,7 @@ contract ForumTest is Test {
         assertEq(_getStatementById(1).rank, 1, "Statement B should be rank 1");
 
         // Add more support to Statement B to overtake Statement A
+        _nextBlock();
         _addStatementSupport(1, 2); // Now has 4 support total
 
         // Verify rankings changed
@@ -200,12 +454,13 @@ contract ForumTest is Test {
         registeredMember
     {
         // Create and rank two statements
-        forum.addStatement("Statement A");
-        forum.addStatement("Statement B");
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
         _addStatementSupport(0, 5); // Rank 0
         _addStatementSupport(1, 3); // Rank 1
 
         // Add support to B but not enough to overtake A
+        _nextBlock();
         _addStatementSupport(1, 1); // Now has 4 support total, still less than A
 
         // Verify rankings didn't change
@@ -221,16 +476,46 @@ contract ForumTest is Test {
         );
     }
 
+    function testRankedStatementTiePreservesExistingOrder()
+        external
+        registeredMember
+    {
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        _setStatementSupport(0, 5); // A has 5 support, rank 0
+        _setStatementSupport(1, 3); // B has 3 support, rank 1
+
+        _nextBlock();
+        _setStatementSupport(1, 5); // B now matches A
+
+        assertEq(
+            _getStatementById(0).support,
+            _getStatementById(1).support,
+            "Statements should have equal support"
+        );
+        assertEq(
+            _getStatementById(0).rank,
+            0,
+            "Statement A should keep rank 0 on tie"
+        );
+        assertEq(
+            _getStatementById(1).rank,
+            1,
+            "Statement B should stay rank 1 on tie"
+        );
+    }
+
     function testRemovingSupportLowersRank() external registeredMember {
         // Create and rank three statements
-        forum.addStatement("Statement A");
-        forum.addStatement("Statement B");
-        forum.addStatement("Statement C");
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        forum.addStatement("Statement C", 0);
         _addStatementSupport(0, 5); // Rank 0
         _addStatementSupport(1, 4); // Rank 1
         _addStatementSupport(2, 3); // Rank 2
 
         // Remove support from Statement A
+        _nextBlock();
         _addStatementSupport(0, -3); // Now has 2 support
 
         // A should now be rank 2
@@ -255,13 +540,14 @@ contract ForumTest is Test {
         external
         registeredMember
     {
-        forum.addStatement("Test statement");
+        forum.addStatement("Test statement", 0);
         _addStatementSupport(0, 3); // Gets ranked
 
         assertEq(_getStatementById(0).rank, 0, "Statement should be ranked");
         assertEq(forum.rankedCount(), 1, "Ranked count should be 1");
 
         // Remove support down to 1 (below ranking threshold of 2)
+        _nextBlock();
         _addStatementSupport(0, -2);
 
         Forum.Statement memory statement = _getStatementById(0);
@@ -274,12 +560,13 @@ contract ForumTest is Test {
         external
         registeredMember
     {
-        forum.addStatement("Statement A");
-        forum.addStatement("Statement B");
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
         _addStatementSupport(0, 10); // Rank 0
         _addStatementSupport(1, 3); // Rank 1
 
         // Remove some support from A but it still has more than B
+        _nextBlock();
         _addStatementSupport(0, -4); // Now has 6 support
 
         assertEq(
@@ -307,11 +594,9 @@ contract ForumTest is Test {
         external
         registeredMember
     {
-        forum.addStatement("Test statement");
+        forum.addStatement("Test statement", 0);
         uint initialBalance = forum.getUserBalance();
-
-        _addStatementSupport(0, 3); // Cost should be 6 (triangular number)
-
+        _addStatementSupport(0, 3);
         uint newBalance = forum.getUserBalance();
         assertEq(
             newBalance,
@@ -324,16 +609,18 @@ contract ForumTest is Test {
         external
         registeredMember
     {
-        forum.addStatement("Test statement");
+        forum.addStatement("Test statement", 0);
         _addStatementSupport(0, 5); // Cost: 15
-        uint balanceAfterAdding = forum.getUserBalance();
 
-        _addStatementSupport(0, -2); // Refund cost of going from 5 to 3: 15 - 6 = 9
+        uint balanceBeforeRemoval = forum.getUserBalance();
+
+        _nextBlock();
+        _addStatementSupport(0, -2); // Refund cost of going from 5 to 3 = 15 - 6 = 9
 
         uint finalBalance = forum.getUserBalance();
         assertEq(
             finalBalance,
-            balanceAfterAdding + 9,
+            balanceBeforeRemoval + 9,
             "Balance should increase by 9 when removing 2 units from 5"
         );
     }
@@ -342,16 +629,18 @@ contract ForumTest is Test {
         external
         registeredMember
     {
-        forum.addStatement("Test statement");
+        forum.addStatement("Test statement", 0);
 
         // Spend most of the balance
-        uint currentBalance = forum.getUserBalance();
-        _addStatementSupport(0, 44); // Cost: 990
+        _addStatementSupport(0, 44); // Cost: 990, balance: 1000 - 990 = 10
 
-        currentBalance = forum.getUserBalance();
         // Try to add more support than balance allows
-        vm.expectRevert(abi.encodeWithSelector(Forum.InsufficientCredits.selector, currentBalance, 495));
-        _addStatementSupport(0, 10); // Would cost 1485 - 990 = 495, but only ~60 credits left
+        // Going from 44 to 54 costs triangular(54) - triangular(44) = 1485 - 990 = 495
+        _nextBlock();
+        vm.expectRevert(
+            abi.encodeWithSelector(Forum.InsufficientCredits.selector, 10, 495)
+        );
+        _addStatementSupport(0, 10);
     }
 
     function testCostIsTriangularNumber() external view {
@@ -398,6 +687,63 @@ contract ForumTest is Test {
         );
     }
 
+    function testCostClampsSmallestSupportToOnePart() external {
+        // With creditMultiplier > 1 the raw quadratic cost of a single credit
+        // part floors to zero; the clamp charges a minimum of one part so the
+        // smallest support increment is never free (resolves L-2).
+        ForumHarness clampForum = new ForumHarness(
+            mockRegistry,
+            "",
+            Forum.ForumConfig({
+                maxRankedStatements: 3,
+                creditAllowanceIntervalSeconds: CREDIT_ALLOWANCE_INTERVAL_SECONDS,
+                engagementWindowSeconds: 60,
+                maxStatementLength: 120,
+                userCreditAllowancePerInterval: 25 * 100,
+                userStartingCredits: 1000 * 100,
+                minStatementSupportToRank: 2 * 100,
+                minAdjustmentIntervalSeconds: 12,
+                creditMultiplier: 100,
+                refundPenaltyBps: 0,
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: 1000,
+                statementRefillIntervalSeconds: 60
+            })
+        );
+
+        // Zero support is still free.
+        assertEq(
+            clampForum.exposed_costOfUserSupport(0),
+            0,
+            "Cost of 0 should be 0"
+        );
+        // One part would floor to 0 (1 * 101 / 200 == 0) -- clamp lifts it to 1.
+        assertEq(
+            clampForum.exposed_costOfUserSupport(1),
+            1,
+            "Smallest nonzero support should cost one part, not zero"
+        );
+        // The clamp applies to the magnitude, so -1 is also charged.
+        assertEq(
+            clampForum.exposed_costOfUserSupport(-1),
+            1,
+            "Cost of -1 should also be clamped to one part"
+        );
+        // Two parts already floors to 1 (2 * 102 / 200 == 1) -- unchanged.
+        assertEq(
+            clampForum.exposed_costOfUserSupport(2),
+            1,
+            "Cost of 2 parts should be 1 (unchanged by clamp)"
+        );
+        // A larger value whose floor is already > 0 is unaffected
+        // (20 * 120 / 200 == 12).
+        assertEq(
+            clampForum.exposed_costOfUserSupport(20),
+            12,
+            "Cost of 20 parts should be 12 (unchanged by clamp)"
+        );
+    }
+
     function testNegativeSupportCostSameAsPositive() external view {
         // Verify negative support has same cost as positive
         assertEq(
@@ -413,34 +759,38 @@ contract ForumTest is Test {
     }
 
     function testMarginalCostIsCorrect() external registeredMember {
-        forum.addStatement("Test statement");
+        forum.addStatement("Test statement", 0);
 
         // The marginal cost of the (n+1)th unit is n+1
         // When going from n to n+1, the cost change is:
         // triangular(n+1) - triangular(n) = (n+1)(n+2)/2 - n(n+1)/2 = (n+1)
 
         uint initialBalance = forum.getUserBalance();
-        _addStatementSupport(0, 1); // Marginal cost: 1
+
+        // 0 → 1: marginal cost = 1
+        _addStatementSupport(0, 1);
         assertEq(
             forum.getUserBalance(),
             initialBalance - 1,
             "First unit should cost 1"
         );
 
-        uint balance2 = forum.getUserBalance();
-        _addStatementSupport(0, 1); // Marginal cost: 2
+        // 1 → 2: marginal cost = 2, total cost = 3
+        _nextBlock();
+        _addStatementSupport(0, 1);
         assertEq(
             forum.getUserBalance(),
-            balance2 - 2,
-            "Second unit should cost 2"
+            initialBalance - 3,
+            "Second unit should bring total cost to 3"
         );
 
-        uint balance3 = forum.getUserBalance();
-        _addStatementSupport(0, 1); // Marginal cost: 3
+        // 2 → 3: marginal cost = 3, total cost = 6
+        _nextBlock();
+        _addStatementSupport(0, 1);
         assertEq(
             forum.getUserBalance(),
-            balance3 - 3,
-            "Third unit should cost 3"
+            initialBalance - 6,
+            "Third unit should bring total cost to 6"
         );
     }
 
@@ -448,18 +798,18 @@ contract ForumTest is Test {
         external
         registeredMember
     {
-        forum.addStatement("Statement A");
-        forum.addStatement("Statement B");
-        forum.addStatement("Statement C");
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        forum.addStatement("Statement C", 0);
 
         uint initialBalance = forum.getUserBalance();
 
         // Adjust support for multiple statements at once
         Forum.SupportAdjustment[]
             memory adjustments = new Forum.SupportAdjustment[](3);
-        adjustments[0] = Forum.SupportAdjustment({statementId: 0, value: 3});
-        adjustments[1] = Forum.SupportAdjustment({statementId: 1, value: 5});
-        adjustments[2] = Forum.SupportAdjustment({statementId: 2, value: 2});
+        adjustments[0] = _deltaSupportAdjustment(0, 3);
+        adjustments[1] = _deltaSupportAdjustment(1, 5);
+        adjustments[2] = _deltaSupportAdjustment(2, 2);
         forum.adjustSupport(adjustments);
 
         // Total cost should be 6 + 15 + 3 = 24
@@ -493,38 +843,100 @@ contract ForumTest is Test {
     // ======================================================================
 
     function testStatementSupportDecaysOverTime() external registeredMember {
-        forum.addStatement("Test statement");
+        forum.addStatement("Test statement", 0);
         _addStatementSupport(0, 10);
 
         int supportBefore = _getStatementById(0).support;
         assertEq(supportBefore, 10, "Initial support should be 100");
 
-        // Advance by 4 steps
-        vm.warp(vm.getBlockTimestamp() + 4 * DecayUtils.STEP_DURATION_SECONDS);
+        // Advance by 1 half-life (604800 seconds = 1 week)
+        vm.warp(vm.getBlockTimestamp() + HALF_LIFE);
 
-        int supportAfter4Steps = _getStatementById(0).support;
-        assertEq(supportAfter4Steps, 9, "Support should decay over time");
+        int supportAfterHalfLife = _getStatementById(0).support;
+        assertEq(
+            supportAfterHalfLife,
+            5,
+            "Support should halve after 1 half-life"
+        );
 
-        // Advance another 96 steps
-        vm.warp(vm.getBlockTimestamp() + 96 * DecayUtils.STEP_DURATION_SECONDS);
+        // Advance another half-life (2 total)
+        vm.warp(vm.getBlockTimestamp() + HALF_LIFE);
 
-        int supportAfter100Steps = _getStatementById(0).support;
-        assertEq(supportAfter100Steps, 2, "Support should decay over time");
+        int supportAfterTwoHalfLives = _getStatementById(0).support;
+        assertEq(
+            supportAfterTwoHalfLives,
+            2,
+            "Support should quarter after 2 half-lives"
+        );
+    }
+
+    function testStatementFractionalSupportDecaysAfterOnePercentThreshold()
+        external
+        registeredMember
+    {
+        ForumHarness fractionalForum = new ForumHarness(
+            mockRegistry,
+            "",
+            Forum.ForumConfig({
+                maxRankedStatements: 3,
+                creditAllowanceIntervalSeconds: CREDIT_ALLOWANCE_INTERVAL_SECONDS,
+                engagementWindowSeconds: 60,
+                maxStatementLength: 120,
+                userCreditAllowancePerInterval: 25 * 100,
+                userStartingCredits: 1000 * 100,
+                minStatementSupportToRank: 2 * 100,
+                minAdjustmentIntervalSeconds: 12,
+                creditMultiplier: 100,
+                refundPenaltyBps: 0,
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: 1000,
+                statementRefillIntervalSeconds: 60
+            })
+        );
+
+        fractionalForum.addStatement("Fractional decay", 0);
+
+        Forum.SupportAdjustment[]
+            memory adjustments = new Forum.SupportAdjustment[](1);
+        adjustments[0] = _setToSupportAdjustment(0, 100);
+        fractionalForum.adjustSupport(adjustments);
+
+        int supportBefore = fractionalForum
+            .getStatementsById(_oneId(0))[0]
+            .support;
+        assertEq(
+            supportBefore,
+            100,
+            "Initial fractional support should be 100"
+        );
+
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
+        assertEq(
+            fractionalForum.getStatementsById(_oneId(0))[0].support,
+            supportBefore,
+            "Fractional support should not visibly decay before the threshold"
+        );
+
+        vm.warp(MOCK_TEST_TIMESTAMP + ONE_PERCENT_DECAY_SECONDS);
+
+        assertEq(
+            fractionalForum.getStatementsById(_oneId(0))[0].support,
+            99,
+            "Fractional support should decay to 99 at the 1% threshold"
+        );
     }
 
     function testAdjustingSupportAccountsForDecay() external registeredMember {
-        forum.addStatement("Test statement");
+        forum.addStatement("Test statement", 0);
         _addStatementSupport(0, 10);
 
-        // Advance time to cause decay
-        vm.warp(vm.getBlockTimestamp() + 10 * DecayUtils.STEP_DURATION_SECONDS);
+        // Advance by 1 half-life so support decays from 10 to 5
+        vm.warp(vm.getBlockTimestamp() + HALF_LIFE);
 
-        // The statement's support has decayed, but adding more should work correctly
         int supportBeforeAdjustment = _getStatementById(0).support;
         _addStatementSupport(0, 5);
 
         int finalSupport = _getStatementById(0).support;
-        // Final support should be approximately decayed value + 5
         assertEq(
             finalSupport,
             supportBeforeAdjustment + 5,
@@ -534,8 +946,8 @@ contract ForumTest is Test {
 
     function testRankingUpdatedAfterSupportDecay() external registeredMember {
         // Create two statements with different support levels
-        forum.addStatement("Statement A");
-        forum.addStatement("Statement B");
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
         _addStatementSupport(0, 20); // High initial support
         _addStatementSupport(1, 10); // Lower initial support
 
@@ -550,10 +962,10 @@ contract ForumTest is Test {
             "Statement B should initially be rank 1"
         );
 
-        // Wait 2x42 steps for significant decay
+        // Wait 1 half-life for decay
         // A = 20 -> 10
         // B = 10 -> 5
-        vm.warp(vm.getBlockTimestamp() + 42 * DecayUtils.STEP_DURATION_SECONDS);
+        vm.warp(vm.getBlockTimestamp() + HALF_LIFE);
 
         // Trigger ranking update by adjusting support on B
         _addStatementSupport(1, 6);
@@ -574,7 +986,7 @@ contract ForumTest is Test {
         external
         registeredMember
     {
-        forum.addStatement("Test statement");
+        forum.addStatement("Test statement", 0);
         _addStatementSupport(0, 10);
 
         // Check user's support immediately
@@ -587,8 +999,8 @@ contract ForumTest is Test {
         );
         assertEq(userSupport[0].support, 10, "User support should be 10");
 
-        // Advance time by 4 steps
-        vm.warp(vm.getBlockTimestamp() + 4 * DecayUtils.STEP_DURATION_SECONDS);
+        // Advance time by 1 half-life
+        vm.warp(vm.getBlockTimestamp() + HALF_LIFE);
 
         // Check user's support after decay
         userSupport = forum.getUserStatementSupport();
@@ -599,12 +1011,12 @@ contract ForumTest is Test {
         );
         assertEq(
             userSupport[0].support,
-            9,
-            "User support should have decayed to 9"
+            5,
+            "User support should have decayed to 5"
         );
 
-        // Advance time by another 96 steps
-        vm.warp(vm.getBlockTimestamp() + 96 * DecayUtils.STEP_DURATION_SECONDS);
+        // Advance time by another half-life (2 total)
+        vm.warp(vm.getBlockTimestamp() + HALF_LIFE);
 
         // Check user's support after decay
         userSupport = forum.getUserStatementSupport();
@@ -620,11 +1032,42 @@ contract ForumTest is Test {
         );
     }
 
+    function testGetUserStatementSupportAfterFullDecay()
+        external
+        registeredMember
+    {
+        // Create two statements with different initial support levels.
+        // Statement 0 gets low support (will decay to zero first).
+        // Statement 1 gets higher support (will survive longer).
+        forum.addStatement("Low support", 0);
+        forum.addStatement("High support", 0);
+        _addStatementSupport(0, 1);
+        _addStatementSupport(1, 10);
+
+        // Advance time so support=1 decays to 0, while support=10 survives.
+        // 1 half-life: support=1 → 0 (1>>1=0), support=10 → 5.
+        vm.warp(vm.getBlockTimestamp() + HALF_LIFE);
+
+        // This call previously reverted due to an out-of-bounds array write.
+        Forum.StatementSupport[] memory userSupport = forum
+            .getUserStatementSupport();
+        assertEq(
+            userSupport.length,
+            1,
+            "Only the non-decayed statement should be returned"
+        );
+        assertEq(
+            userSupport[0].statementId,
+            1,
+            "Surviving statement should be statement 1"
+        );
+    }
+
     function testUserBalanceAccountsForSupportDecay()
         external
         registeredMember
     {
-        forum.addStatement("Test statement");
+        forum.addStatement("Test statement", 0);
 
         uint initialBalance = forum.getUserBalance();
         _addStatementSupport(0, 10); // Cost: 55
@@ -636,22 +1079,23 @@ contract ForumTest is Test {
             "Balance should decrease by 55"
         );
 
-        // Advance time to cause support decay
-        vm.warp(vm.getBlockTimestamp() + 42 * DecayUtils.STEP_DURATION_SECONDS);
+        // Advance time to cause support decay (1 half-life)
+        vm.warp(vm.getBlockTimestamp() + HALF_LIFE);
 
-        // User's support has decayed to ~5, which costs 15 instead of 55
+        // User's support has decayed to 5, which costs 15 instead of 55
         // When they remove all support, they should get back only the cost of current support
-        _addStatementSupport(0, -5); // Current support is ~5, removing it should refund ~15
+        _addStatementSupport(0, -5); // Current support is 5, removing it should refund 15
 
         uint finalBalance = forum.getUserBalance();
-        // The refund should be approximately 15 (cost of ~5 support)
-        // Plus the time-based allowance
-        uint expectedTimeAllowance = 42 * 25;
+        // The refund should be 15 (cost of 5 support)
+        // Plus the time-based allowance: 604800 / 60 = 10080 intervals * 25 credits
+        uint expectedTimeAllowance = (HALF_LIFE /
+            CREDIT_ALLOWANCE_INTERVAL_SECONDS) * 25;
 
         assertEq(
             finalBalance,
             balanceAfterSupport + 15 + expectedTimeAllowance,
-            "Balance should increase by decayed support cost plus time allowance"
+            "Balance should account for decayed support cost and time allowance"
         );
     }
 
@@ -659,7 +1103,7 @@ contract ForumTest is Test {
         external
         registeredMember
     {
-        forum.addStatement("Test statement");
+        forum.addStatement("Test statement", 0);
         _addStatementSupport(0, 10);
 
         // Verify statement is in user's support list
@@ -673,9 +1117,9 @@ contract ForumTest is Test {
         assertEq(userSupport[0].statementId, 0, "Statement ID should be 0");
         assertEq(userSupport[0].support, 10, "User support should be 10");
 
-        // Wait long enough for support to decay to 0 (168 steps = 4 half-lives)
+        // Wait long enough for support to decay to 0 (4 half-lives)
         // 10 -> 5 -> 2 -> 1 -> 0
-        vm.warp(vm.getBlockTimestamp() + 168 * DecayUtils.STEP_DURATION_SECONDS);
+        vm.warp(vm.getBlockTimestamp() + HALF_LIFE * 4);
 
         // Check that the statement is no longer in user's support list
         userSupport = forum.getUserStatementSupport();
@@ -688,89 +1132,190 @@ contract ForumTest is Test {
 
     function testLowestRankStatementIsEvictedWhenMaxRankedStatementsExceeded()
         external
+        registeredMember
     {
-        // Create a forum with a low max ranked statements limit for testing
-        ForumHarness testForum = new ForumHarness(mockRegistry, "", 3);
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        forum.addStatement("Statement C", 0);
+        forum.addStatement("Statement D", 0);
 
-        // Register and create statements
-        mockRegistry.register("");
-
-        testForum.addStatement("Statement A");
-        testForum.addStatement("Statement B");
-        testForum.addStatement("Statement C");
-        testForum.addStatement("Statement D");
-
-        // Add support to fill up the ranking
+        // Add support to fill up the ranking (maxRankedStatements = 3)
         Forum.SupportAdjustment[]
             memory adjustments = new Forum.SupportAdjustment[](3);
-        adjustments[0] = Forum.SupportAdjustment({statementId: 0, value: 5});
-        adjustments[1] = Forum.SupportAdjustment({statementId: 1, value: 4});
-        adjustments[2] = Forum.SupportAdjustment({statementId: 2, value: 3});
-        testForum.adjustSupport(adjustments);
+        adjustments[0] = _deltaSupportAdjustment(0, 5);
+        adjustments[1] = _deltaSupportAdjustment(1, 4);
+        adjustments[2] = _deltaSupportAdjustment(2, 3);
+        forum.adjustSupport(adjustments);
 
         // Verify we have 3 ranked statements
-        assertEq(testForum.rankedCount(), 3, "Should have 3 ranked statements");
+        assertEq(forum.rankedCount(), 3, "Should have 3 ranked statements");
         assertEq(
-            testForum.getRankedStatement(0).id,
+            forum.getRankedStatement(0).id,
             0,
             "Statement A should be rank 0"
         );
         assertEq(
-            testForum.getRankedStatement(1).id,
+            forum.getRankedStatement(1).id,
             1,
             "Statement B should be rank 1"
         );
         assertEq(
-            testForum.getRankedStatement(2).id,
+            forum.getRankedStatement(2).id,
             2,
             "Statement C should be rank 2"
         );
 
         // Now add high support to Statement D, which should evict Statement C (lowest rank)
-        Forum.SupportAdjustment[]
-            memory adjustment = new Forum.SupportAdjustment[](1);
-        adjustment[0] = Forum.SupportAdjustment({statementId: 3, value: 6});
-        testForum.adjustSupport(adjustment);
+        _addStatementSupport(3, 6);
 
         // Verify we still have 3 ranked statements
         assertEq(
-            testForum.rankedCount(),
+            forum.rankedCount(),
             3,
             "Should still have 3 ranked statements"
         );
 
         // Verify Statement D is now ranked
         assertEq(
-            testForum.getRankedStatement(0).id,
+            forum.getRankedStatement(0).id,
             3,
             "Statement D should be rank 0"
         );
         assertEq(
-            testForum.getRankedStatement(1).id,
+            forum.getRankedStatement(1).id,
             0,
             "Statement A should be rank 1"
         );
         assertEq(
-            testForum.getRankedStatement(2).id,
+            forum.getRankedStatement(2).id,
             1,
             "Statement B should be rank 2"
         );
 
         // Verify Statement C was evicted (rank should be -1)
-        uint[] memory statementIds = new uint[](1);
-        statementIds[0] = 2;
-        Forum.Statement[] memory statements = testForum.getStatementsById(
-            statementIds
-        );
+        Forum.Statement memory evicted = _getStatementById(2);
+        assertEq(evicted.rank, -1, "Statement C should no longer be ranked");
+        assertEq(evicted.support, 3, "Statement C should still have 3 support");
+    }
+
+    // ======================================================================
+    // Section: getRankedStatementsPage pagination boundaries
+    // ======================================================================
+
+    /// @dev Seeds 4 statements where exactly 2 are ranked (ids 0 and 1, in
+    ///      that rank order) and 2 stay unranked, leaving rankedCount == 2 and
+    ///      statementCount == 4 so pagination past the ranked tail can be
+    ///      exercised.
+    function _seedTwoRankedOfFour() internal {
+        forum.addStatement("Ranked A", 5); // support 5 -> rank 0
+        forum.addStatement("Ranked B", 3); // support 3 -> rank 1
+        forum.addStatement("Unranked C", 0); // no support
+        forum.addStatement("Unranked D", 1); // below minStatementSupportToRank
+    }
+
+    function testGetRankedStatementsPageReturnsFullPage()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(0, 2);
+
+        assertEq(page.length, 2, "Page should contain both ranked statements");
+        assertEq(page[0].id, 0, "First entry should be rank 0 (id 0)");
+        assertEq(page[1].id, 1, "Second entry should be rank 1 (id 1)");
+    }
+
+    function testGetRankedStatementsPageRespectsLimit()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(0, 1);
+
+        assertEq(page.length, 1, "Limit of 1 should yield a single entry");
+        assertEq(page[0].id, 0, "Only entry should be rank 0 (id 0)");
+    }
+
+    function testGetRankedStatementsPageTruncatesToRankedTail()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        // start within range but limit overruns the ranked tail.
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(1, 10);
+
         assertEq(
-            statements[0].rank,
-            -1,
-            "Statement C should no longer be ranked"
+            page.length,
+            1,
+            "Should truncate to the single remaining rank"
         );
+        assertEq(page[0].id, 1, "Remaining entry should be rank 1 (id 1)");
+    }
+
+    /// @dev L-1: a start at the ranked boundary is not an error -- it returns
+    ///      an empty page rather than reverting.
+    function testGetRankedStatementsPageEmptyAtRankedBoundary()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(
+            forum.rankedCount(),
+            10
+        );
+
+        assertEq(page.length, 0, "Page at the ranked boundary should be empty");
+    }
+
+    /// @dev L-1 regression: previously `rankedCount - _start` underflowed and
+    ///      reverted when rankedCount < _start <= statementCount. It must now
+    ///      return an empty page instead.
+    function testGetRankedStatementsPageEmptyBetweenRankedAndStatementCount()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        // rankedCount == 2, statementCount == 4; start = 3 sits in the gap.
+        assertEq(forum.rankedCount(), 2, "Precondition: 2 ranked statements");
+        assertEq(forum.statementCount(), 4, "Precondition: 4 statements total");
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(3, 10);
+
+        assertEq(page.length, 0, "Page in the unranked gap should be empty");
+    }
+
+    /// @dev L-1: a start well past statementCount also returns empty rather
+    ///      than reverting.
+    function testGetRankedStatementsPageEmptyFarPastEnd()
+        external
+        registeredMember
+    {
+        _seedTwoRankedOfFour();
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(1000, 5);
+
+        assertEq(page.length, 0, "Page far past the end should be empty");
+    }
+
+    function testGetRankedStatementsPageEmptyWhenNothingRanked()
+        external
+        registeredMember
+    {
+        forum.addStatement("Unranked only", 0);
+
+        assertEq(forum.rankedCount(), 0, "Precondition: nothing ranked");
+
+        Forum.Statement[] memory page = forum.getRankedStatementsPage(0, 10);
+
         assertEq(
-            statements[0].support,
-            3,
-            "Statement C should still have 3 support"
+            page.length,
+            0,
+            "Empty ranked list should yield an empty page"
         );
     }
 
@@ -779,18 +1324,14 @@ contract ForumTest is Test {
     // ======================================================================
 
     function testNewItemsAreAddedToFirstEmptySlot() external registeredMember {
-        // Create multiple statements
-        forum.addStatement("Statement A");
-        forum.addStatement("Statement B");
-        forum.addStatement("Statement C");
-        forum.addStatement("Statement D");
-
-        // Support statements A, B, and C
-        _addStatementSupport(0, 10);
-        _addStatementSupport(1, 10);
-        _addStatementSupport(2, 10);
+        // Create statements with initial support
+        forum.addStatement("Statement A", 10);
+        forum.addStatement("Statement B", 10);
+        forum.addStatement("Statement C", 10);
+        forum.addStatement("Statement D", 0);
 
         // Remove all support from B (creating an empty slot)
+        _nextBlock();
         _addStatementSupport(1, -10);
 
         // Now add support to statement D
@@ -846,19 +1387,12 @@ contract ForumTest is Test {
         external
         registeredMember
     {
-        // Create 5 statements: A, B, C, D, E
-        forum.addStatement("Statement A");
-        forum.addStatement("Statement B");
-        forum.addStatement("Statement C");
-        forum.addStatement("Statement D");
-        forum.addStatement("Statement E");
-
-        // Support all 5 statements - array will be [A, B, C, D, E]
-        _addStatementSupport(0, 10);
-        _addStatementSupport(1, 10);
-        _addStatementSupport(2, 10);
-        _addStatementSupport(3, 10);
-        _addStatementSupport(4, 10);
+        // Create 5 statements with initial support
+        forum.addStatement("Statement A", 10);
+        forum.addStatement("Statement B", 10);
+        forum.addStatement("Statement C", 10);
+        forum.addStatement("Statement D", 10);
+        forum.addStatement("Statement E", 10);
 
         // Verify we have 5 statements
         Forum.StatementSupport[] memory userSupport = forum
@@ -875,6 +1409,7 @@ contract ForumTest is Test {
         assertEq(initialLength, 5, "Initial raw array length should be 5");
 
         // Remove support from B (creating one empty slot at index 1)
+        _nextBlock();
         _addStatementSupport(1, -10);
 
         // Remove support from C (creating second empty slot at index 2)
@@ -892,8 +1427,7 @@ contract ForumTest is Test {
         );
 
         // Now add support to a new statement F
-        // F fills the first empty slot; no further compaction occurs
-        forum.addStatement("Statement F");
+        forum.addStatement("Statement F", 0);
         _addStatementSupport(5, 5);
 
         // Verify array length stays at 4 (F just filled an empty slot)
@@ -927,5 +1461,895 @@ contract ForumTest is Test {
             "Index 2 should be E (moved from index 4 to second empty slot)"
         );
         assertEq(userSupport[3].statementId, 3, "Index 3 should be D");
+    }
+
+    // ======================================================================
+    // Section: peakRank tracking
+    // ======================================================================
+
+    function testPeakRankIsNegativeOneForNewStatement()
+        external
+        registeredMember
+    {
+        forum.addStatement("Fresh statement", 0);
+        Forum.Statement memory s = _getStatementById(0);
+        assertEq(s.rank, -1, "New statement should not be ranked");
+        assertEq(
+            s.peakRank,
+            -1,
+            "peakRank should be -1 for never-ranked statement"
+        );
+    }
+
+    function testPeakRankTracksFirstRanking() external registeredMember {
+        forum.addStatement("Test statement", 0);
+        _addStatementSupport(0, 3); // Gets ranked at position 0
+
+        Forum.Statement memory s = _getStatementById(0);
+        assertEq(s.rank, 0, "Statement should be ranked at 0");
+        assertEq(s.peakRank, 0, "peakRank should be 0 after first ranking");
+    }
+
+    function testPeakRankImprovesWhenRankImproves() external registeredMember {
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        _addStatementSupport(0, 5); // Rank 0
+        _addStatementSupport(1, 3); // Rank 1
+
+        assertEq(
+            _getStatementById(1).peakRank,
+            1,
+            "B peakRank should be 1 initially"
+        );
+
+        // Give B more support so it overtakes A
+        _nextBlock();
+        _addStatementSupport(1, 4); // B now has 7, overtakes A (5)
+
+        assertEq(_getStatementById(1).rank, 0, "B should now be rank 0");
+        assertEq(
+            _getStatementById(1).peakRank,
+            0,
+            "B peakRank should improve to 0"
+        );
+    }
+
+    function testPeakRankDoesNotWorsenWhenRankDrops()
+        external
+        registeredMember
+    {
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        _addStatementSupport(0, 5); // Rank 0
+        _addStatementSupport(1, 3); // Rank 1
+
+        assertEq(_getStatementById(0).peakRank, 0, "A peakRank should be 0");
+
+        // Give B more support so it overtakes A → A drops to rank 1
+        _nextBlock();
+        _addStatementSupport(1, 4); // B=7, A=5
+
+        assertEq(_getStatementById(0).rank, 1, "A should now be rank 1");
+        assertEq(
+            _getStatementById(0).peakRank,
+            0,
+            "A peakRank should remain 0 even though current rank is 1"
+        );
+    }
+
+    function testPeakRankPreservedAfterEviction() external registeredMember {
+        // maxRankedStatements = 3 from setUp, so fill 3 slots then evict the lowest
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        forum.addStatement("Statement C", 0);
+        forum.addStatement("Statement D", 0);
+
+        // Rank A, B, C to fill all 3 slots
+        _addStatementSupport(0, 6); // Rank 0
+        _addStatementSupport(1, 4); // Rank 1
+        _addStatementSupport(2, 3); // Rank 2
+
+        // C is at rank 2 — its peakRank should be 2
+        assertEq(_getStatementById(2).peakRank, 2, "C peakRank should be 2");
+
+        // Now give D enough support to evict C
+        _addStatementSupport(3, 5); // D gets rank 1, C evicted
+
+        // C should be evicted (rank -1), but peakRank preserved at 2
+        Forum.Statement memory sC = _getStatementById(2);
+        assertEq(sC.rank, -1, "C should be evicted");
+        assertEq(sC.peakRank, 2, "C peakRank should still be 2 after eviction");
+    }
+
+    function testPeakRankTracksDisplacedStatements() external registeredMember {
+        // When statement X rises in rank, statements it displaces get
+        // their rank set via _setStatementRank, which should also track peakRank.
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        forum.addStatement("Statement C", 0);
+        _addStatementSupport(0, 6); // Rank 0
+        _addStatementSupport(1, 4); // Rank 1
+        _addStatementSupport(2, 2); // Rank 2
+
+        // B has peakRank 1, C has peakRank 2
+        assertEq(_getStatementById(1).peakRank, 1, "B peakRank should be 1");
+        assertEq(_getStatementById(2).peakRank, 2, "C peakRank should be 2");
+
+        // Remove support from A so it drops below both B and C
+        _nextBlock();
+        _addStatementSupport(0, -5); // A now has 1 support → unranked or rank 2
+
+        // B and C should have moved up. B→0, C→1
+        assertEq(_getStatementById(1).rank, 0, "B should be rank 0");
+        assertEq(_getStatementById(2).rank, 1, "C should be rank 1");
+
+        // peakRank should have improved for both
+        assertEq(
+            _getStatementById(1).peakRank,
+            0,
+            "B peakRank should improve to 0"
+        );
+        assertEq(
+            _getStatementById(2).peakRank,
+            1,
+            "C peakRank should improve to 1"
+        );
+    }
+
+    // ======================================================================
+    // Section: StatementRankChanged event
+    // ======================================================================
+
+    function testRankChangedEmittedOnAddStatementSupport()
+        external
+        registeredMember
+    {
+        forum.addStatement("Statement A", 0);
+        vm.expectEmit(true, false, false, true);
+        emit Forum.StatementRankChanged(0, -1, 0);
+        _addStatementSupport(0, 3); // Statement A should go from unranked (-1) to rank 0
+    }
+
+    function testRankChangedEmittedWhenStatementsSwap()
+        external
+        registeredMember
+    {
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        _addStatementSupport(0, 5); // A rank 0
+        _addStatementSupport(1, 3); // B rank 1
+
+        // Give B enough to overtake A: A displaced 0→1, B rises 1→0
+        vm.expectEmit(true, false, false, true);
+        emit Forum.StatementRankChanged(0, 0, 1);
+        vm.expectEmit(true, false, false, true);
+        emit Forum.StatementRankChanged(1, 1, 0);
+        _nextBlock();
+        _addStatementSupport(1, 4); // B now has 7 > A's 5
+    }
+
+    function testRankChangedEmittedWhenStatementEvictedByMaxRank()
+        external
+        registeredMember
+    {
+        // maxRankedStatements = 3
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        forum.addStatement("Statement C", 0);
+        forum.addStatement("Statement D", 0); // NOT ranked (4th exceeds max)
+
+        _addStatementSupport(0, 6); // A rank 0
+        _addStatementSupport(1, 4); // B rank 1
+        _addStatementSupport(2, 3); // C rank 2
+
+        // D with support 5 evicts C, displaces B, enters at rank 1
+        vm.expectEmit(true, false, false, true);
+        emit Forum.StatementRankChanged(2, 2, -1); // C evicted
+        vm.expectEmit(true, false, false, true);
+        emit Forum.StatementRankChanged(1, 1, 2); // B displaced to rank 2
+        vm.expectEmit(true, false, false, true);
+        emit Forum.StatementRankChanged(3, -1, 1); // D enters at rank 1
+        _addStatementSupport(3, 5);
+    }
+
+    function testRankChangedEmittedByMaintenanceEviction()
+        external
+        registeredMember
+    {
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        _addStatementSupport(0, 5);
+        _addStatementSupport(1, 3);
+
+        // Push B's support negative to trigger maintenance eviction
+        vm.expectEmit(true, false, false, true);
+        emit Forum.StatementRankChanged(1, 1, -1);
+        _nextBlock();
+        _addStatementSupport(1, -4); // B support goes to -1
+    }
+
+    function testNoRankChangedEmittedWhenRankUnchanged()
+        external
+        registeredMember
+    {
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        _addStatementSupport(0, 10); // Rank 0
+        _addStatementSupport(1, 3); // Rank 1
+
+        // Adding more support to A doesn't change its rank (still 0)
+        // We record logs and check no StatementRankChanged was emitted for id 0
+        vm.recordLogs();
+        _nextBlock();
+        _addStatementSupport(0, 1);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 rankChangedSig = keccak256(
+            "StatementRankChanged(uint256,int256,int256)"
+        );
+        for (uint i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == rankChangedSig) {
+                // If a rank changed event was emitted, it should NOT be for statement 0
+                // (statement 0's rank should not have changed)
+                uint emittedId = uint(logs[i].topics[1]);
+                assertTrue(
+                    emittedId != 0,
+                    "Should not emit rank change for statement 0"
+                );
+            }
+        }
+    }
+
+    function testSupportBelowThresholdUnranksImmediatelyFromMiddle()
+        external
+        registeredMember
+    {
+        // Three ranked statements; remove support from the top-ranked one
+        // so it drops below threshold. It should be unranked immediately,
+        // not deferred to maintenance.
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        forum.addStatement("Statement C", 0);
+        _addStatementSupport(0, 6); // Rank 0
+        _addStatementSupport(1, 4); // Rank 1
+        _addStatementSupport(2, 3); // Rank 2
+
+        assertEq(forum.rankedCount(), 3, "All three should be ranked");
+
+        // Drop A's support to 1 (below minStatementSupportToRank = 2)
+        _nextBlock();
+        _addStatementSupport(0, -5);
+
+        Forum.Statement memory sA = _getStatementById(0);
+        assertEq(sA.rank, -1, "Statement A should be immediately unranked");
+        assertEq(
+            forum.rankedCount(),
+            2,
+            "Ranked count should be 2 after eviction"
+        );
+
+        // B and C should remain ranked and compact correctly
+        Forum.Statement memory sB = _getStatementById(1);
+        Forum.Statement memory sC = _getStatementById(2);
+        assertEq(sB.rank, 0, "Statement B should be rank 0");
+        assertEq(sC.rank, 1, "Statement C should be rank 1");
+    }
+
+    function testSupportBelowThresholdUnranksFromSecondPosition()
+        external
+        registeredMember
+    {
+        // Remove support from the middle-ranked statement
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        forum.addStatement("Statement C", 0);
+        _addStatementSupport(0, 6); // Rank 0
+        _addStatementSupport(1, 4); // Rank 1
+        _addStatementSupport(2, 3); // Rank 2
+
+        // Drop B's support below threshold
+        _nextBlock();
+        _addStatementSupport(1, -3); // B now has 1 support
+
+        Forum.Statement memory sB = _getStatementById(1);
+        assertEq(sB.rank, -1, "Statement B should be immediately unranked");
+        assertEq(forum.rankedCount(), 2, "Ranked count should be 2");
+
+        // A stays rank 0, C moves up to rank 1
+        assertEq(_getStatementById(0).rank, 0, "Statement A should be rank 0");
+        assertEq(_getStatementById(2).rank, 1, "Statement C should be rank 1");
+    }
+
+    // ======================================================================
+    // Section: StatementEngaged event
+    // ======================================================================
+
+    function testEngagedEmittedOnFirstInteraction() external registeredMember {
+        forum.addStatement("Statement A", 0);
+
+        // First interaction should always emit (lastEngagementEventTimestamp = 0)
+        vm.recordLogs();
+        _addStatementSupport(0, 1);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 engagedSig = keccak256("StatementEngaged(uint256)");
+        bool found = false;
+        for (uint i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics[0] == engagedSig && uint(logs[i].topics[1]) == 0
+            ) {
+                found = true;
+            }
+        }
+        assertTrue(
+            found,
+            "StatementEngaged should be emitted on first interaction"
+        );
+    }
+
+    function testEngagedNotEmittedWithinWindow() external registeredMember {
+        forum.addStatement("Statement A", 0);
+        _addStatementSupport(0, 1); // First interaction emits
+
+        // Interact again within the engagement window (< 60s)
+        vm.warp(vm.getBlockTimestamp() + 30);
+
+        vm.recordLogs();
+        _addStatementSupport(0, 1);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 engagedSig = keccak256("StatementEngaged(uint256)");
+        bool found = false;
+        for (uint i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics[0] == engagedSig && uint(logs[i].topics[1]) == 0
+            ) {
+                found = true;
+            }
+        }
+        assertFalse(
+            found,
+            "StatementEngaged should not be emitted within window"
+        );
+    }
+
+    function testEngagedEmittedAfterWindowExpires() external registeredMember {
+        forum.addStatement("Statement A", 0);
+        _addStatementSupport(0, 1); // First interaction emits
+
+        // Advance past the engagement window (>= 60s)
+        vm.warp(vm.getBlockTimestamp() + 60);
+
+        vm.expectEmit(true, false, false, false);
+        emit Forum.StatementEngaged(0);
+        _addStatementSupport(0, 1);
+    }
+
+    function testEngagedWindowIsPerStatement() external registeredMember {
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+
+        _addStatementSupport(0, 1); // Emits for A
+
+        // Advance 30s (within A's window)
+        vm.warp(vm.getBlockTimestamp() + 30);
+
+        // First interaction with B should emit regardless of A's cooldown
+        vm.recordLogs();
+        _addStatementSupport(1, 1);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 engagedSig = keccak256("StatementEngaged(uint256)");
+        bool found = false;
+        for (uint i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics[0] == engagedSig && uint(logs[i].topics[1]) == 1
+            ) {
+                found = true;
+            }
+        }
+        assertTrue(
+            found,
+            "StatementEngaged should emit for B independently of A's cooldown"
+        );
+    }
+
+    function testEngagedTimestampResetsOnEmission() external registeredMember {
+        forum.addStatement("Statement A", 0);
+        _addStatementSupport(0, 1); // t=0, emits
+
+        // Advance past window
+        vm.warp(vm.getBlockTimestamp() + 60); // t=60
+        _addStatementSupport(0, 1); // Emits, resets timestamp to t=60
+
+        // Advance only 30s from the RESET timestamp (not from original)
+        vm.warp(vm.getBlockTimestamp() + 30); // t=90
+
+        vm.recordLogs();
+        _addStatementSupport(0, 1);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 engagedSig = keccak256("StatementEngaged(uint256)");
+        bool found = false;
+        for (uint i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics[0] == engagedSig && uint(logs[i].topics[1]) == 0
+            ) {
+                found = true;
+            }
+        }
+        assertFalse(
+            found,
+            "StatementEngaged should not emit before window from last emission"
+        );
+
+        // Advance another 30s (now 60s from reset)
+        vm.warp(vm.getBlockTimestamp() + 30); // t=120
+
+        vm.expectEmit(true, false, false, false);
+        emit Forum.StatementEngaged(0);
+        _addStatementSupport(0, 1);
+    }
+
+    // ======================================================================
+    // Multicall tests (reproducing frontend flow)
+    // ======================================================================
+
+    function testMulticallAdjustSupport() external registeredMember {
+        // Step 1: Create a statement directly
+        forum.addStatement("Test statement", 1);
+        _nextBlock();
+
+        // Step 2: Adjust support via multicall (exactly how the frontend does it)
+        Forum.SupportAdjustment[]
+            memory adjustments = new Forum.SupportAdjustment[](1);
+        adjustments[0] = _deltaSupportAdjustment(0, 1);
+
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeCall(Forum.adjustSupport, (adjustments));
+
+        forum.multicall(calls);
+
+        // Verify the support was applied
+        Forum.Statement memory stmt = _getStatementById(0);
+        assertTrue(stmt.support > 1, "Support should have increased");
+    }
+
+    function testMulticallAddStatementThenAdjustSupport()
+        external
+        registeredMember
+    {
+        // When the frontend commits both a new statement and support
+        // adjustments in the same multicall, the adjustSupport targets
+        // EXISTING statements, not the just-created one (which would
+        // hit DuplicateAdjustment because lastUpdated == block.timestamp).
+        forum.addStatement("Pre-existing statement", 1);
+        assertEq(
+            _getStatementById(0).support,
+            1,
+            "Pre-existing statement should start with 1 support"
+        );
+        _nextBlock();
+
+        bytes[] memory calls = new bytes[](2);
+
+        // Call 1: addStatement (new statement)
+        calls[0] = abi.encodeCall(
+            Forum.addStatement,
+            ("Multicall statement", 0)
+        );
+
+        // Call 2: adjustSupport on statement 0 (the pre-existing one)
+        Forum.SupportAdjustment[]
+            memory adjustments = new Forum.SupportAdjustment[](1);
+        adjustments[0] = _deltaSupportAdjustment(0, 1);
+        calls[1] = abi.encodeCall(Forum.adjustSupport, (adjustments));
+
+        forum.multicall(calls);
+
+        Forum.Statement memory stmt = _getStatementById(0);
+        assertEq(
+            stmt.support,
+            2,
+            "Multicall adjustment should increase support from 1 to 2"
+        );
+    }
+
+    function testMulticallAdjustSupportAfterDelay() external registeredMember {
+        // Create statement and wait significant time before adjusting
+        // via multicall — tests the decay path with large elapsedSeconds
+        forum.addStatement("Decay test", 44);
+
+        int initialSupport = _getStatementById(0).support;
+        assertEq(initialSupport, 44, "Initial support should be 44");
+
+        // Wait long enough for integer-rounded decay to be visible.
+        vm.warp(block.timestamp + 1 days);
+
+        int decayedSupport = _getStatementById(0).support;
+        assertLt(
+            decayedSupport,
+            initialSupport,
+            "Support should visibly decay before multicall adjustment"
+        );
+
+        Forum.SupportAdjustment[]
+            memory adjustments = new Forum.SupportAdjustment[](1);
+        adjustments[0] = _deltaSupportAdjustment(0, 1);
+
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeCall(Forum.adjustSupport, (adjustments));
+
+        forum.multicall(calls);
+
+        int supportAfterMulticall = _getStatementById(0).support;
+        assertGt(
+            supportAfterMulticall,
+            decayedSupport,
+            "Multicall adjustment should increase decayed support"
+        );
+    }
+
+    function testMulticallAdjustSupportAfterLongDelay()
+        external
+        registeredMember
+    {
+        // Create statement and wait a very long time
+        forum.addStatement("Long decay test", 5);
+
+        // Wait 30 days
+        vm.warp(block.timestamp + 30 days);
+
+        Forum.SupportAdjustment[]
+            memory adjustments = new Forum.SupportAdjustment[](1);
+        adjustments[0] = _deltaSupportAdjustment(0, 1);
+
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeCall(Forum.adjustSupport, (adjustments));
+
+        forum.multicall(calls);
+    }
+}
+
+// ======================================================================
+// Separate test contract for refund penalty behaviour
+// ======================================================================
+
+contract ForumRefundPenaltyTest is Test {
+    uint constant MOCK_TEST_TIMESTAMP = 1767572100;
+    uint constant CREDIT_ALLOWANCE_INTERVAL_SECONDS = 60;
+    uint constant HALF_LIFE = 604800;
+    DevSymvoliaRegistry mockRegistry;
+    ForumHarness forum;
+
+    function setUp() public {
+        vm.warp(MOCK_TEST_TIMESTAMP);
+        mockRegistry = new DevSymvoliaRegistry();
+        forum = new ForumHarness(
+            mockRegistry,
+            "",
+            Forum.ForumConfig({
+                maxRankedStatements: 3,
+                creditAllowanceIntervalSeconds: CREDIT_ALLOWANCE_INTERVAL_SECONDS,
+                engagementWindowSeconds: 60,
+                maxStatementLength: 120,
+                userCreditAllowancePerInterval: 25,
+                userStartingCredits: 1000,
+                minStatementSupportToRank: 2,
+                minAdjustmentIntervalSeconds: 12,
+                creditMultiplier: 1,
+                refundPenaltyBps: 2000,
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: 1000,
+                statementRefillIntervalSeconds: 60
+            })
+        );
+    }
+
+    function _nextBlock() internal {
+        vm.warp(block.timestamp + forum.minAdjustmentIntervalSeconds());
+    }
+
+    modifier registeredMember() {
+        mockRegistry.register("");
+        _;
+    }
+
+    function _deltaSupportAdjustment(
+        uint _statementId,
+        int _value
+    ) internal pure returns (Forum.SupportAdjustment memory) {
+        return
+            Forum.SupportAdjustment({
+                statementId: _statementId,
+                value: _value,
+                adjustmentType: Forum.SupportAdjustmentType.Delta
+            });
+    }
+
+    function _addStatementSupport(uint _statementId, int _value) internal {
+        Forum.SupportAdjustment[]
+            memory adjustments = new Forum.SupportAdjustment[](1);
+        adjustments[0] = _deltaSupportAdjustment(_statementId, _value);
+        forum.adjustSupport(adjustments);
+    }
+
+    function testRefundPenaltyBpsIsSet() external view {
+        assertEq(
+            forum.refundPenaltyBps(),
+            2000,
+            "refundPenaltyBps should be 2000"
+        );
+    }
+
+    function testRefundPenaltyAppliedOnWithdrawal() external registeredMember {
+        forum.addStatement("Test statement", 0);
+        _addStatementSupport(0, 5); // Cost: 15, balance: 1000 - 15 = 985
+
+        uint balanceBeforeRemoval = forum.getUserBalance();
+
+        _nextBlock();
+        _addStatementSupport(0, -2); // Reducing from 5 to 3: refund = 15 - 6 = 9
+
+        uint finalBalance = forum.getUserBalance();
+        // With 20% penalty: refund = 9, penalty = 1 (floor(9 * 2000 / 10000)), net refund = 8
+        // Note: 9 * 2000 / 10000 = 1.8 → truncated to 1
+        assertEq(
+            finalBalance,
+            balanceBeforeRemoval + 8,
+            "Refund should be 8 after 20% penalty on 9 (penalty=1 truncated)"
+        );
+    }
+
+    function testNoPenaltyWhenAddingSupport() external registeredMember {
+        forum.addStatement("Test statement", 0);
+        uint initialBalance = forum.getUserBalance();
+
+        _addStatementSupport(0, 3); // Cost: 6
+
+        uint finalBalance = forum.getUserBalance();
+        assertEq(
+            finalBalance,
+            initialBalance - 6,
+            "Adding support should cost full amount with no penalty"
+        );
+    }
+
+    function testNoPenaltyOnNetZeroReallocation() external registeredMember {
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        // Add support to A: cost(3) = 6
+        _addStatementSupport(0, 3);
+
+        uint balanceBeforeReallocation = forum.getUserBalance();
+
+        // Reallocate: reduce A from 3 to 0 (refund 6), increase B from 0 to 3 (cost 6)
+        // Net cost change = 0, so no penalty
+        _nextBlock();
+        Forum.SupportAdjustment[]
+            memory adjustments = new Forum.SupportAdjustment[](2);
+        adjustments[0] = _deltaSupportAdjustment(0, -3);
+        adjustments[1] = _deltaSupportAdjustment(1, 3);
+        forum.adjustSupport(adjustments);
+
+        uint finalBalance = forum.getUserBalance();
+        assertEq(
+            finalBalance,
+            balanceBeforeReallocation,
+            "Net-zero reallocation should incur no penalty"
+        );
+    }
+
+    function testPenaltyOnlyOnNetRefund() external registeredMember {
+        forum.addStatement("Statement A", 0);
+        forum.addStatement("Statement B", 0);
+        // A: cost(20) = 20*21/2 = 210
+        _addStatementSupport(0, 20);
+        // B: cost(10) = 10*11/2 = 55
+        _addStatementSupport(1, 10);
+
+        uint balanceBefore = forum.getUserBalance();
+
+        _nextBlock();
+        // Reduce A from 20 to 0 (refund 210), increase B from 10 to 15 (cost 120 - 55 = 65)
+        // Net cost change = 65 - 210 = -145 (refund of 145)
+        // Penalty = 145 * 2000 / 10000 = 29 (exact, no rounding). Net refund = 116
+        Forum.SupportAdjustment[]
+            memory adjustments = new Forum.SupportAdjustment[](2);
+        adjustments[0] = _deltaSupportAdjustment(0, -20);
+        adjustments[1] = _deltaSupportAdjustment(1, 5);
+        forum.adjustSupport(adjustments);
+
+        uint finalBalance = forum.getUserBalance();
+        assertEq(
+            finalBalance,
+            balanceBefore + 116,
+            "Should receive net refund of 116 after 20% penalty on 145"
+        );
+    }
+
+    function testFullWithdrawalPenalty() external registeredMember {
+        forum.addStatement("Test statement", 0);
+        _addStatementSupport(0, 10); // Cost: 55, balance: 1000 - 55 = 945
+
+        uint balanceBefore = forum.getUserBalance();
+
+        _nextBlock();
+        _addStatementSupport(0, -10); // Full withdrawal, refund 55
+
+        uint finalBalance = forum.getUserBalance();
+        // Penalty = floor(55 * 2000 / 10000) = 11. Net refund = 44
+        assertEq(
+            finalBalance,
+            balanceBefore + 44,
+            "Full withdrawal should refund 44 after 20% penalty on 55"
+        );
+    }
+}
+
+/// @dev Exercises the per-user statement-creation token bucket with a small
+///      capacity so limits are hit within a test.
+contract ForumStatementRateLimitTest is Test {
+    uint constant MOCK_TEST_TIMESTAMP = 1767572100;
+    uint constant BURST_CAPACITY = 5;
+    uint constant REFILL_INTERVAL = 14400; // 4 hours
+
+    DevSymvoliaRegistry mockRegistry;
+    ForumHarness forum;
+
+    function setUp() public {
+        vm.warp(MOCK_TEST_TIMESTAMP);
+        mockRegistry = new DevSymvoliaRegistry();
+        forum = new ForumHarness(
+            mockRegistry,
+            "",
+            Forum.ForumConfig({
+                maxRankedStatements: 100,
+                creditAllowanceIntervalSeconds: 60,
+                engagementWindowSeconds: 60,
+                maxStatementLength: 120,
+                userCreditAllowancePerInterval: 25,
+                userStartingCredits: 1000,
+                minStatementSupportToRank: 2,
+                minAdjustmentIntervalSeconds: 12,
+                creditMultiplier: 1,
+                refundPenaltyBps: 0,
+                decaySpeedupFactor: 1,
+                statementBurstCapacity: BURST_CAPACITY,
+                statementRefillIntervalSeconds: REFILL_INTERVAL
+            })
+        );
+    }
+
+    modifier registeredMember() {
+        mockRegistry.register("");
+        _;
+    }
+
+    function testEmptyStatementReverts() external registeredMember {
+        vm.expectRevert(Forum.EmptyStatement.selector);
+        forum.addStatement("", 0);
+    }
+
+    function testBurstUpToCapacitySucceeds() external registeredMember {
+        for (uint i = 0; i < BURST_CAPACITY; i++) {
+            forum.addStatement("statement", 0);
+        }
+        (uint available, uint nextRefill) = forum.getStatementAllowance();
+        assertEq(available, 0, "Bucket should be empty after a full burst");
+        assertEq(
+            nextRefill,
+            block.timestamp + REFILL_INTERVAL,
+            "Next refill should be one interval away"
+        );
+    }
+
+    function testExceedingCapacityReverts() external registeredMember {
+        for (uint i = 0; i < BURST_CAPACITY; i++) {
+            forum.addStatement("statement", 0);
+        }
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Forum.StatementRateLimited.selector,
+                block.timestamp + REFILL_INTERVAL
+            )
+        );
+        forum.addStatement("one too many", 0);
+    }
+
+    function testTokenRegainedAfterInterval() external registeredMember {
+        for (uint i = 0; i < BURST_CAPACITY; i++) {
+            forum.addStatement("statement", 0);
+        }
+
+        // After one refill interval, exactly one token is available again.
+        vm.warp(block.timestamp + REFILL_INTERVAL);
+        (uint available, ) = forum.getStatementAllowance();
+        assertEq(available, 1, "Exactly one token should be regained");
+
+        forum.addStatement("after refill", 0);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Forum.StatementRateLimited.selector,
+                block.timestamp + REFILL_INTERVAL
+            )
+        );
+        forum.addStatement("empty again", 0);
+    }
+
+    function testAllowanceCapsAtCapacityAfterLongIdle()
+        external
+        registeredMember
+    {
+        forum.addStatement("statement", 0);
+
+        // Idle far longer than capacity * interval; allowance must cap.
+        vm.warp(block.timestamp + REFILL_INTERVAL * 1000);
+        (uint available, uint nextRefill) = forum.getStatementAllowance();
+        assertEq(
+            available,
+            BURST_CAPACITY,
+            "Allowance should cap at burst capacity"
+        );
+        assertEq(nextRefill, 0, "A full bucket has no pending refill");
+    }
+
+    function testInitialAllowanceIsFullCapacity() external registeredMember {
+        (uint available, uint nextRefill) = forum.getStatementAllowance();
+        assertEq(
+            available,
+            BURST_CAPACITY,
+            "A fresh user starts with a full bucket"
+        );
+        assertEq(nextRefill, 0, "A full bucket has no pending refill");
+    }
+
+    function testSubIntervalRemainderIsCarried() external registeredMember {
+        for (uint i = 0; i < BURST_CAPACITY; i++) {
+            forum.addStatement("statement", 0);
+        }
+
+        // Advance 1.5 intervals: one token refills, half an interval carries.
+        vm.warp(block.timestamp + REFILL_INTERVAL + REFILL_INTERVAL / 2);
+        forum.addStatement("after partial refill", 0);
+
+        // Only half an interval more (total 2 intervals since the burst) is
+        // needed for the next token, proving the remainder was carried.
+        vm.warp(block.timestamp + REFILL_INTERVAL / 2);
+        (uint available, ) = forum.getStatementAllowance();
+        assertEq(
+            available,
+            1,
+            "Carried remainder should speed the next refill"
+        );
+    }
+
+    function testMulticallBurstBeyondCapacityRevertsAtomically()
+        external
+        registeredMember
+    {
+        bytes[] memory calls = new bytes[](BURST_CAPACITY + 1);
+        for (uint i = 0; i < calls.length; i++) {
+            calls[i] = abi.encodeCall(
+                Forum.addStatement,
+                ("statement", int(0))
+            );
+        }
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Forum.StatementRateLimited.selector,
+                block.timestamp + REFILL_INTERVAL
+            )
+        );
+        forum.multicall(calls);
+
+        // The whole batch reverted, so no statements were recorded.
+        assertEq(
+            forum.statementCount(),
+            0,
+            "Atomic revert should leave no statements"
+        );
     }
 }

@@ -1,20 +1,32 @@
 import { useMemo } from "react";
-import { useUserVotes } from "../state/UserVotes";
+import { SupportAdjustmentType, useUserVotes } from "../state/UserVotes";
+import { useForum } from "../state/Forum";
+import { partsToCredits } from "../util";
 
-/** Triangle number cost for a given support level */
-const creditCost = (support: number): number => {
-  return (support * (support + 1)) / 2;
+/** Quadratic cost for a given support level in credit parts (matches on-chain formula). */
+const creditCost = (support: number, creditMultiplier: number): number => {
+  const abs = Math.abs(support);
+  return (abs * (abs + creditMultiplier)) / (2 * creditMultiplier);
 };
 
+export type StagedDirection = "increase" | "decrease" | "none";
+
 export interface CreditAllocation {
-  /** Credits committed on-chain (minus any pending decreases) */
+  /** Credits that stay committed on-chain regardless of pending changes */
   allocated: number;
-  /** Credits tied up in pending adjustments (increases + decreases) */
+  /** Magnitude of the net pending change (0 when increases and decreases cancel) */
   staged: number;
-  /** Credits available to allocate */
+  /** Credits that stay available regardless of pending changes */
   unallocated: number;
   /** Total credits the user has */
   total: number;
+  /**
+   * Direction of the net pending change:
+   * - "increase": net credits will move from unallocated into allocated
+   * - "decrease": net credits will move from allocated back to unallocated
+   * - "none": no net change staged
+   */
+  stagedDirection: StagedDirection;
 }
 
 /**
@@ -25,6 +37,7 @@ export interface CreditAllocation {
  */
 export const useCreditAllocation = (): CreditAllocation | null => {
   const userVotes = useUserVotes();
+  const { creditMultiplier } = useForum();
 
   return useMemo(() => {
     if (
@@ -40,7 +53,7 @@ export const useCreditAllocation = (): CreditAllocation | null => {
     // Total on-chain cost (committed credits)
     let totalOnChainCost = 0;
     for (const [, support] of onChain.statementSupport) {
-      totalOnChainCost += creditCost(support);
+      totalOnChainCost += creditCost(support, creditMultiplier);
     }
 
     // Pending adjustment impact
@@ -49,23 +62,63 @@ export const useCreditAllocation = (): CreditAllocation | null => {
 
     for (const [statementId, adjustment] of staged.supportAdjustments) {
       const onChainSupport = onChain.statementSupport.get(statementId) || 0;
-      const effectiveSupport = onChainSupport + adjustment;
+      const effectiveSupport =
+        adjustment.adjustmentType === SupportAdjustmentType.SetTo
+          ? adjustment.value
+          : onChainSupport + adjustment.value;
 
-      const onChainC = creditCost(onChainSupport);
-      const effectiveC = creditCost(effectiveSupport);
+      const onChainC = creditCost(onChainSupport, creditMultiplier);
+      const effectiveC = creditCost(effectiveSupport, creditMultiplier);
+      const costChange = effectiveC - onChainC;
 
-      if (adjustment < 0) {
-        totalDecreaseCost += onChainC - effectiveC;
-      } else if (adjustment > 0) {
-        totalIncreaseCost += effectiveC - onChainC;
+      if (costChange < 0) {
+        totalDecreaseCost += -costChange;
+      } else if (costChange > 0) {
+        totalIncreaseCost += costChange;
       }
     }
 
-    const allocated = totalOnChainCost - totalDecreaseCost;
-    const stagedAmount = totalDecreaseCost + totalIncreaseCost;
-    const unallocated = onChain.credits - totalIncreaseCost;
-    const total = allocated + stagedAmount + unallocated;
+    // Include cost for staged new statements
+    for (const stmt of staged.stagedStatements) {
+      if (stmt.initialSupport !== 0) {
+        totalIncreaseCost += creditCost(stmt.initialSupport, creditMultiplier);
+      }
+    }
 
-    return { allocated, staged: stagedAmount, unallocated, total };
-  }, [userVotes]);
+    // Include cost of the in-progress draft (before it is staged)
+    const draftCost = userVotes.state.pendingDraftCost;
+    totalIncreaseCost += draftCost;
+
+    // Net pending change: positive means allocation grows (credits leave the
+    // unallocated pool), negative means allocation shrinks (credits return to it).
+    const net = totalIncreaseCost - totalDecreaseCost;
+
+    let allocated: number;
+    let stagedAmount: number;
+    let unallocated: number;
+
+    if (net >= 0) {
+      // Firmly-allocated stays put; the net increase transitions out of unallocated.
+      allocated = totalOnChainCost;
+      stagedAmount = net;
+      unallocated = onChain.credits - net;
+    } else {
+      // Firmly-unallocated stays put; the net decrease transitions out of allocated.
+      allocated = totalOnChainCost + net;
+      stagedAmount = -net;
+      unallocated = onChain.credits;
+    }
+
+    const total = allocated + stagedAmount + unallocated;
+    const stagedDirection: StagedDirection =
+      net > 0 ? "increase" : net < 0 ? "decrease" : "none";
+
+    return {
+      allocated: partsToCredits(allocated, creditMultiplier),
+      staged: partsToCredits(stagedAmount, creditMultiplier),
+      unallocated: partsToCredits(unallocated, creditMultiplier),
+      total: partsToCredits(total, creditMultiplier),
+      stagedDirection,
+    };
+  }, [userVotes, creditMultiplier]);
 };

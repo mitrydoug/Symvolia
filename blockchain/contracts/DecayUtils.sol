@@ -1,23 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.28;
 
+import "@openzeppelin/contracts/utils/math/Math.sol";
+
 library DecayUtils {
-    error TimestampOrderInvalid(uint fromTimestamp, uint toTimestamp);
-
     uint public constant UINT_BITS = 256;
-    uint public constant HALF_LIFE_STEPS = 42;
-    uint public constant STEP_DURATION_SECONDS = 10 seconds;
+    uint public constant HALF_LIFE_SECONDS = 604800;
     uint public constant DECAY_MULTIPLIER_BITS = 64;
-    uint public constant DECAY_MULTIPLIER_1_STEP = 0xFBCF4D652629F24A;
-    uint public constant DECAY_MULTIPLIER_2_STEPS = 0xF7B029A299CFF9E0;
-    uint public constant DECAY_MULTIPLIER_4_STEPS = 0xEFA569910B284EB1;
-    uint public constant DECAY_MULTIPLIER_8_STEPS = 0xE05645FE1355F239;
-    uint public constant DECAY_MULTIPLIER_16_STEPS = 0xC497178FBBAE583A;
-    uint public constant DECAY_MULTIPLIER_32_STEPS = 0x96F7B540E51D8332;
+    uint public constant DECAY_MULTIPLIER_1_SECOND = 0xFFFFECC5A413F413;
+    uint public constant DECAY_MULTIPLIER_2_SECONDS = 0xFFFFD98B49999F18;
+    uint public constant DECAY_MULTIPLIER_4_SECONDS = 0xFFFFB31698FA198E;
+    uint public constant DECAY_MULTIPLIER_8_SECONDS = 0xFFFF662D490F9D14;
+    uint public constant DECAY_MULTIPLIER_16_SECONDS = 0xFFFECC5AEE8CC644;
+    uint public constant DECAY_MULTIPLIER_32_SECONDS = 0xFFFD98B74ECEDED3;
+    uint public constant DECAY_MULTIPLIER_64_SECONDS = 0xFFFB3174646C15A4;
+    uint public constant DECAY_MULTIPLIER_128_SECONDS = 0xFFF662FFE3DA026C;
+    uint public constant DECAY_MULTIPLIER_256_SECONDS = 0xFFECC65C31FF220C;
+    uint public constant DECAY_MULTIPLIER_512_SECONDS = 0xFFD98E29FF4932C5;
+    uint public constant DECAY_MULTIPLIER_1024_SECONDS = 0xFFB32219FCB93B56;
+    uint public constant DECAY_MULTIPLIER_2048_SECONDS = 0xFF665B487A5B5904;
+    uint public constant DECAY_MULTIPLIER_4096_SECONDS = 0xFECD12C7421017A4;
+    uint public constant DECAY_MULTIPLIER_8192_SECONDS = 0xFD9B958A7B985D12;
+    uint public constant DECAY_MULTIPLIER_16384_SECONDS = 0xFB3CE4222557513F;
+    uint public constant DECAY_MULTIPLIER_32768_SECONDS = 0xF69075D6B0879152;
+    uint public constant DECAY_MULTIPLIER_65536_SECONDS = 0xED79F3FD63091535;
+    uint public constant DECAY_MULTIPLIER_131072_SECONDS = 0xDC4B07DBB77174AA;
+    uint public constant DECAY_MULTIPLIER_262144_SECONDS = 0xBD910B7F3E463D9B;
+    uint public constant DECAY_MULTIPLIER_524288_SECONDS = 0x8C5F7D27E89C7121;
 
-    function approxDecayHalvingEvery42Steps(
+    /// @notice Applies exponential decay to a value over the given number of seconds.
+    /// @dev Uses binary exponentiation with pre-computed fixed-point multipliers.
+    ///      Half-life is 604800 seconds (1 week). Preserves sign.
+    /// @param startValue The value to decay (may be negative).
+    /// @param elapsedSeconds The elapsed time in seconds.
+    /// @return The decayed value, rounded to nearest.
+    function approxDecay(
         int startValue,
-        uint steps
+        uint elapsedSeconds
     ) internal pure returns (int) {
         if (startValue == 0) {
             return 0;
@@ -26,137 +45,281 @@ library DecayUtils {
         bool sign = startValue > 0;
         uint value = sign ? uint(startValue) : uint(-startValue);
 
-        uint _halvings = steps / HALF_LIFE_STEPS;
+        uint _halvings = elapsedSeconds / HALF_LIFE_SECONDS;
         value >>= _halvings;
-        steps = steps % HALF_LIFE_STEPS;
-        if (value == 0 || steps == 0) {
+        elapsedSeconds = elapsedSeconds % HALF_LIFE_SECONDS;
+        if (value == 0 || elapsedSeconds == 0) {
             return sign ? int(value) : -int(value);
         }
 
         uint toShift = 0;
-        uint bitsUpperBound = 40;
+        // Compute the actual number of bits needed to represent `value`.
+        // Math.log2 returns floor(log2(value)), so add 1 for the bit count.
+        uint bitsUsed = Math.log2(value) + 1;
 
-        if (steps >= 32) {
-            if (bitsUpperBound + DECAY_MULTIPLIER_BITS > UINT_BITS) {
-                uint _shift = bitsUpperBound +
-                    DECAY_MULTIPLIER_BITS -
-                    UINT_BITS;
-                value >>= _shift;
-                bitsUpperBound -= _shift;
-                toShift -= _shift;
+        if (elapsedSeconds >= 524288) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
             }
-            value = value * DECAY_MULTIPLIER_32_STEPS;
-            bitsUpperBound += DECAY_MULTIPLIER_BITS;
-            toShift += DECAY_MULTIPLIER_BITS;
-            steps -= 32;
+            value *= DECAY_MULTIPLIER_524288_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 524288;
         }
 
-        if (steps >= 16) {
-            if (bitsUpperBound + DECAY_MULTIPLIER_BITS > UINT_BITS) {
-                uint _shift = bitsUpperBound +
-                    DECAY_MULTIPLIER_BITS -
-                    UINT_BITS;
-                value >>= _shift;
-                bitsUpperBound -= _shift;
-                toShift -= _shift;
+        if (elapsedSeconds >= 262144) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
             }
-            value *= DECAY_MULTIPLIER_16_STEPS;
-            bitsUpperBound += DECAY_MULTIPLIER_BITS;
-            toShift += DECAY_MULTIPLIER_BITS;
-            steps -= 16;
+            value *= DECAY_MULTIPLIER_262144_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 262144;
         }
 
-        if (steps >= 8) {
-            if (bitsUpperBound + DECAY_MULTIPLIER_BITS > UINT_BITS) {
-                uint _shift = bitsUpperBound +
-                    DECAY_MULTIPLIER_BITS -
-                    UINT_BITS;
-                value >>= _shift;
-                bitsUpperBound -= _shift;
-                toShift -= _shift;
+        if (elapsedSeconds >= 131072) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
             }
-            value *= DECAY_MULTIPLIER_8_STEPS;
-            bitsUpperBound += DECAY_MULTIPLIER_BITS;
-            toShift += DECAY_MULTIPLIER_BITS;
-            steps -= 8;
+            value *= DECAY_MULTIPLIER_131072_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 131072;
         }
 
-        if (steps >= 4) {
-            if (bitsUpperBound + DECAY_MULTIPLIER_BITS > UINT_BITS) {
-                uint _shift = bitsUpperBound +
-                    DECAY_MULTIPLIER_BITS -
-                    UINT_BITS;
-                value >>= _shift;
-                bitsUpperBound -= _shift;
-                toShift -= _shift;
+        if (elapsedSeconds >= 65536) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
             }
-            value *= DECAY_MULTIPLIER_4_STEPS;
-            bitsUpperBound += DECAY_MULTIPLIER_BITS;
-            toShift += DECAY_MULTIPLIER_BITS;
-            steps -= 4;
+            value *= DECAY_MULTIPLIER_65536_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 65536;
         }
 
-        if (steps >= 2) {
-            if (bitsUpperBound + DECAY_MULTIPLIER_BITS > UINT_BITS) {
-                uint _shift = bitsUpperBound +
-                    DECAY_MULTIPLIER_BITS -
-                    UINT_BITS;
-                value >>= _shift;
-                bitsUpperBound -= _shift;
-                toShift -= _shift;
+        if (elapsedSeconds >= 32768) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
             }
-            value *= DECAY_MULTIPLIER_2_STEPS;
-            bitsUpperBound += DECAY_MULTIPLIER_BITS;
-            toShift += DECAY_MULTIPLIER_BITS;
-            steps -= 2;
+            value *= DECAY_MULTIPLIER_32768_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 32768;
         }
 
-        if (steps >= 1) {
-            if (bitsUpperBound + DECAY_MULTIPLIER_BITS > UINT_BITS) {
-                uint _shift = bitsUpperBound +
-                    DECAY_MULTIPLIER_BITS -
-                    UINT_BITS;
-                value >>= _shift;
-                bitsUpperBound -= _shift;
-                toShift -= _shift;
+        if (elapsedSeconds >= 16384) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
             }
-            value *= DECAY_MULTIPLIER_1_STEP;
-            bitsUpperBound += DECAY_MULTIPLIER_BITS;
-            toShift += DECAY_MULTIPLIER_BITS;
-            steps -= 1;
+            value *= DECAY_MULTIPLIER_16384_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 16384;
+        }
+
+        if (elapsedSeconds >= 8192) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_8192_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 8192;
+        }
+
+        if (elapsedSeconds >= 4096) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_4096_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 4096;
+        }
+
+        if (elapsedSeconds >= 2048) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_2048_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 2048;
+        }
+
+        if (elapsedSeconds >= 1024) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_1024_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 1024;
+        }
+
+        if (elapsedSeconds >= 512) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_512_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 512;
+        }
+
+        if (elapsedSeconds >= 256) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_256_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 256;
+        }
+
+        if (elapsedSeconds >= 128) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_128_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 128;
+        }
+
+        if (elapsedSeconds >= 64) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_64_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 64;
+        }
+
+        if (elapsedSeconds >= 32) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_32_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 32;
+        }
+
+        if (elapsedSeconds >= 16) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_16_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 16;
+        }
+
+        if (elapsedSeconds >= 8) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_8_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 8;
+        }
+
+        if (elapsedSeconds >= 4) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_4_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 4;
+        }
+
+        if (elapsedSeconds >= 2) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_2_SECONDS;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 2;
+        }
+
+        if (elapsedSeconds >= 1) {
+            uint _overflow = 0;
+            if (bitsUsed + DECAY_MULTIPLIER_BITS > UINT_BITS) {
+                _overflow = bitsUsed + DECAY_MULTIPLIER_BITS - UINT_BITS;
+                value >>= _overflow;
+                bitsUsed -= _overflow;
+            }
+            value *= DECAY_MULTIPLIER_1_SECOND;
+            bitsUsed += DECAY_MULTIPLIER_BITS;
+            toShift += DECAY_MULTIPLIER_BITS - _overflow;
+            elapsedSeconds -= 1;
         }
 
         if (toShift > 0) {
             value = ((value >> (toShift - 1)) + 1) >> 1;
         }
         return sign ? int(value) : -int(value);
-    }
-
-    function ellapsedStepsBetweenTimestamps(
-        uint fromTimestamp,
-        uint toTimestamp
-    ) public pure returns (uint) {
-        if (fromTimestamp > toTimestamp)
-            revert TimestampOrderInvalid(fromTimestamp, toTimestamp);
-        return
-            (toTimestamp / STEP_DURATION_SECONDS) -
-            (fromTimestamp / STEP_DURATION_SECONDS);
-    }
-
-    function decayValue(
-        int startValue,
-        uint fromTimestamp,
-        uint toTimestamp
-    ) external pure returns (int) {
-        uint elapsedSteps = ellapsedStepsBetweenTimestamps(
-            fromTimestamp,
-            toTimestamp
-        );
-
-        if (startValue == 0 || elapsedSteps == 0) {
-            return startValue;
-        }
-
-        return approxDecayHalvingEvery42Steps(startValue, elapsedSteps);
     }
 }

@@ -1,0 +1,10 @@
+# Local development — mock registry (full zkPassport proof flow, no verifier).
+# Launched via: make local-mocked
+#
+# Meilisearch runs in Docker under Overmind. Everything else runs natively.
+
+meilisearch: bash scripts/dev/meilisearch.sh local-mocked
+hardhat: bash scripts/dev/hardhat.sh local-mocked
+contracts: bash scripts/dev/contracts.sh local-mocked
+frontend: bash scripts/dev/frontend.sh local-mocked
+backend: bash scripts/dev/backend.sh local-mocked

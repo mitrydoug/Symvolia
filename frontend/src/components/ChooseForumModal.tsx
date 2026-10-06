@@ -8,12 +8,26 @@ import {
   Modal,
   TextField,
 } from "@mui/material";
+import ForumIcon from "./ForumIcon";
 
-export const FORUMS: {
-  [key: string]: { label: string; value: string; iconSrc: string };
-} = {
-  global: { label: "Global", value: "global", iconSrc: "earth.png" },
-  us: { label: "United States", value: "us", iconSrc: "us.svg" },
+export type Forum = {
+  label: string;
+  value: string;
+  /** Lowercase URL slug used as the first route segment. */
+  slug: string;
+  /** ISO 3166-1 alpha-3 country code, or null for non-country forums (e.g. "global") */
+  countryCode: string | null;
+};
+
+export const FORUMS: Record<string, Forum> = {
+  global: { label: "Earth", value: "global", slug: "earth", countryCode: null },
+  USA: {
+    label: "United States",
+    value: "USA",
+    slug: "usa",
+    countryCode: "USA",
+  },
+  CAN: { label: "Canada", value: "CAN", slug: "can", countryCode: "CAN" },
 };
 
 const style = {
@@ -69,11 +83,7 @@ const ChooseForumModal: FC<ChooseForumModalProps> = ({
                   }}
                 >
                   <ListItemIcon>
-                    <img
-                      src={forum.iconSrc}
-                      alt={`${forum.label} flag`}
-                      style={{ height: "1.5rem", width: "1.5rem" }}
-                    />
+                    <ForumIcon forum={forum} />
                   </ListItemIcon>
                   {forum.label}
                 </ListItemButton>

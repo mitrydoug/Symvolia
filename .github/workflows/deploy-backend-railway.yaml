@@ -1,0 +1,105 @@
+name: Deploy backend to Railway
+
+on:
+  workflow_run:
+    workflows: ["Publish backend Docker image"]
+    types: [completed]
+    branches:
+      - develop
+      - release
+
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Railway deployment target"
+        required: true
+        type: choice
+        options:
+          - development
+          - production
+
+concurrency:
+  group: railway-backend-${{ github.event.workflow_run.head_branch || inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-development:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'develop') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'development')
+    runs-on: ubuntu-latest
+    environment: development
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_DEVELOPMENT_TOKEN }}
+      # Which deployments/<network>.json drives the derived config. The dev
+      # backend targets the committed Base Sepolia testnet deployment.
+      DEPLOY_NETWORK: base_sepolia
+      # --- Secrets (values live only in GitHub secrets, never in source) ---
+      RELAY_RPC_URL: ${{ secrets.BACKEND_RELAY_RPC_URL_DEVELOPMENT }}
+      GAS_SPONSORSHIP_RPC_URL: ${{ secrets.BACKEND_GAS_SPONSORSHIP_RPC_URL_DEVELOPMENT }}
+      INDEXER_RPC_URL: ${{ secrets.BACKEND_INDEXER_RPC_URL_DEVELOPMENT }}
+      MEILI_API_KEY: ${{ secrets.BACKEND_MEILI_API_KEY_DEVELOPMENT }}
+    steps:
+      - name: Check Railway configuration
+        run: |
+          if [ -z "${RAILWAY_TOKEN}" ]; then
+            echo "Set the RAILWAY_DEVELOPMENT_TOKEN repository secret."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
+
+      - name: Sync variables and redeploy backend (development)
+        run: ./scripts/railway-sync-backend.sh
+
+  deploy-production:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'release') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'production')
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_PRODUCTION_TOKEN }}
+      # Production reads its own deployment JSON (Base mainnet). A deployments/
+      # base.json and a "base" entry in deploy/backend-services.json must exist
+      # before this job can succeed.
+      DEPLOY_NETWORK: base
+      # --- Secrets (values live only in GitHub secrets, never in source) ---
+      RELAY_RPC_URL: ${{ secrets.BACKEND_RELAY_RPC_URL_PRODUCTION }}
+      GAS_SPONSORSHIP_RPC_URL: ${{ secrets.BACKEND_GAS_SPONSORSHIP_RPC_URL_PRODUCTION }}
+      INDEXER_RPC_URL: ${{ secrets.BACKEND_INDEXER_RPC_URL_PRODUCTION }}
+      MEILI_API_KEY: ${{ secrets.BACKEND_MEILI_API_KEY_PRODUCTION }}
+    steps:
+      - name: Check Railway configuration
+        run: |
+          if [ -z "${RAILWAY_TOKEN}" ]; then
+            echo "Set the RAILWAY_PRODUCTION_TOKEN repository secret."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
+
+      - name: Sync variables and redeploy backend (production)
+        run: ./scripts/railway-sync-backend.sh

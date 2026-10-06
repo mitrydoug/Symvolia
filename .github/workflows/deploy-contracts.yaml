@@ -1,39 +1,98 @@
-name: Deploy smart contracts to Sepolia
+name: Reconcile smart contracts
 
 on:
   push:
-    branches: ["release"]
+    branches:
+      - develop
+      - release
 
-  # Allow manual re-runs (e.g. after funding the deployer wallet)
   workflow_dispatch:
     inputs:
-      reset:
-        description: >-
-          Wipe existing deployment state before deploying.
-          Use when contract code or constructor parameters have changed.
-        type: boolean
-        default: false
+      target:
+        description: "Contract reconciliation target"
+        required: true
+        type: choice
+        options:
+          - development
+          - production
 
 permissions:
   contents: write
 
-# Prevent parallel deploys — let any in-progress deployment finish
 concurrency:
-  group: "sepolia-contract-deploy"
+  group: contract-reconcile-${{ github.ref_name || inputs.target }}
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  reconcile-development:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'develop') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'development')
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: blockchain
     env:
-      SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
-      SEPOLIA_DEPLOYER_PRIVATE_KEY: ${{ secrets.SEPOLIA_DEPLOYER_PRIVATE_KEY }}
-
+      BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+      BASE_SEPOLIA_DEPLOYER_PRIVATE_KEY: ${{ secrets.BASE_SEPOLIA_DEPLOYER_PRIVATE_KEY }}
+      DEPLOYMENT_PROFILE: base-sepolia
     steps:
-      - name: Checkout
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "npm"
+          cache-dependency-path: blockchain/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile contracts
+        run: npx hardhat compile --build-profile production
+
+      - name: Reconcile Base Sepolia forums
+        run: npx hardhat run scripts/reconcile-forums.ts --network base_sepolia
+
+      - name: Generate deployment artifacts
+        run: |
+          node ../scripts/generate-deployment-artifacts.mjs base_sepolia
+          node ../scripts/generate-backend-env-examples.mjs
+
+      - name: Commit reconciled deployment state
+        run: |
+          git config user.name "smart-contract-deployer"
+          git config user.email "smart-contract-deployer@symvolia.org"
+
+          git add ../deployments/base_sepolia.json
+          git add ../frontend/src/contracts/networks/base_sepolia.ts
+          git add ../deploy/env/*.env.example
+
+          if git diff --cached --quiet; then
+            echo "No Base Sepolia forum reconciliation changes."
+          else
+            git commit -m "chore: reconcile Base Sepolia forum deployments"
+            git push
+          fi
+
+  reconcile-production:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'release') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'production')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: blockchain
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      BASE_DEPLOYER_PRIVATE_KEY: ${{ secrets.BASE_DEPLOYER_PRIVATE_KEY }}
+      DEPLOYMENT_PROFILE: base
+    steps:
+      - name: Checkout release
         uses: actions/checkout@v4
         with:
           ref: release
@@ -41,7 +100,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: "npm"
           cache-dependency-path: blockchain/package-lock.json
 
@@ -52,26 +111,28 @@ jobs:
         run: npx hardhat compile --build-profile production
 
       - name: Check deployer balance
-        run: npx tsx scripts/check-balance.ts
+        run: npx tsx scripts/check-balance.ts base
 
-      - name: Reset deployment state
-        if: inputs.reset == true
-        run: rm -rf ignition/deployments/chain-11155111
+      - name: Reconcile Base Mainnet forums
+        run: npx hardhat run scripts/reconcile-forums.ts --network base
 
-      - name: Deploy contracts to Sepolia
-        run: npx hardhat run scripts/deploy.ts --network sepolia
+      - name: Generate deployment artifacts
+        run: |
+          node ../scripts/generate-deployment-artifacts.mjs base
+          node ../scripts/generate-backend-env-examples.mjs
 
-      - name: Commit deployment state
+      - name: Commit reconciled deployment state
         run: |
           git config user.name "smart-contract-deployer"
-          git config user.email "smart-contract-deployer@ourvoice.eth"
+          git config user.email "smart-contract-deployer@symvolia.org"
 
-          git add ignition/deployments/
-          git add ../frontend/src/contracts/networks/sepolia.ts
+          git add ../deployments/base.json
+          git add ../frontend/src/contracts/networks/base.ts
+          git add ../deploy/env/*.env.example
 
           if git diff --cached --quiet; then
-            echo "No deployment state changes — contracts are up to date."
+            echo "No Base Mainnet forum reconciliation changes."
           else
-            git commit -m "chore: update Sepolia deployment state and contract bindings"
+            git commit -m "chore: reconcile Base Mainnet forum deployments"
             git push
           fi

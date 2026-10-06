@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Symvolia</title>
+  <desc>White variant of the Symvolia tessera icon for dark backgrounds.</desc>
+
+  <!-- Left tessera — White -->
+  <path d="
+    M 31.6,6
+    L 16,6
+    Q 6,6 6,16
+    L 6,32
+    Q 6,42 16,42
+    L 22,42
+    L 14,54
+    L 28,42
+    L 31.6,42
+    L 25.6,36
+    L 37.6,26
+    L 25.6,16
+    Z
+  " fill="#FFFFFF"/>
+
+  <!-- Right tessera — White (lighter opacity) -->
+  <path d="
+    M 32.4,6
+    L 48,6
+    Q 58,6 58,16
+    L 58,32
+    Q 58,42 48,42
+    L 32.4,42
+    L 26.4,36
+    L 38.4,26
+    L 26.4,16
+    Z
+  " fill="#FFFFFF" opacity="0.7"/>
+</svg>

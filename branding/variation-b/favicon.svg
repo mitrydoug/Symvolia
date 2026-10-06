@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Symvoli — Convergence</title>
+  <desc>Seven petals converging on a shared center — many voices, one expression.</desc>
+  <path d="M 16.00,13.00 Q 18.50,7.50 16.00,2.00 Q 13.50,7.50 16.00,13.00 Z" fill="#1A3C6E"/>
+  <path d="M 18.35,14.13 Q 24.20,12.65 26.95,7.27 Q 21.09,8.75 18.35,14.13 Z" fill="#2A5A8E"/>
+  <path d="M 18.92,16.67 Q 23.73,20.33 29.65,19.12 Q 24.84,15.45 18.92,16.67 Z" fill="#3A82AE"/>
+  <path d="M 17.30,18.70 Q 17.44,24.74 22.07,28.61 Q 21.94,22.57 17.30,18.70 Z" fill="#4A8A6E"/>
+  <path d="M 14.70,18.70 Q 10.06,22.57 9.93,28.61 Q 14.56,24.74 14.70,18.70 Z" fill="#8A7040"/>
+  <path d="M 13.08,16.67 Q 7.16,15.45 2.35,19.12 Q 8.27,20.33 13.08,16.67 Z" fill="#C4713B"/>
+  <path d="M 13.65,14.13 Q 10.91,8.75 5.05,7.27 Q 7.80,12.65 13.65,14.13 Z" fill="#D49565"/>
+  <circle cx="16.0" cy="16.0" r="1.7" fill="#1A3C6E" opacity="0.85"/>
+</svg>

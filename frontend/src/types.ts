@@ -4,4 +4,5 @@ export type Statement = {
   createdTimestamp: bigint;
   support: bigint;
   rank: bigint;
+  peakRank: bigint;
 };

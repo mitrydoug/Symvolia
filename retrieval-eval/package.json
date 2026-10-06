@@ -1,0 +1,30 @@
+{
+  "name": "symvolia-retrieval-eval",
+  "version": "0.0.1",
+  "description": "Retrieval evaluation framework for Symvolia's on-device search engine",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "eval:search": "tsx run.ts",
+    "eval:search:cases": "tsx run.ts --case-study",
+    "eval:search:build": "tsx build-topic-clusters.ts",
+    "eval:experiments": "tsx experiments.ts",
+    "eval:import:quora": "tsx import-beir.ts quora",
+    "eval:search:quora": "NODE_OPTIONS=--max-old-space-size=8192 tsx run.ts datasets/quora --max-queries=2000",
+    "eval:import:arguana": "tsx import-beir.ts arguana",
+    "eval:search:arguana": "tsx run.ts datasets/arguana",
+    "eval:import:cqadupstack": "tsx import-beir.ts cqadupstack",
+    "eval:hybrid": "NODE_OPTIONS=--max-old-space-size=8192 tsx run-hybrid.ts"
+  },
+  "dependencies": {
+    "@orama/orama": "^3.1.18",
+    "@xenova/transformers": "^2.17.2",
+    "minisearch": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.2"
+  }
+}

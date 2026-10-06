@@ -1,0 +1,10 @@
+# Local development — dev registry, instant register(string) (no public-network fork).
+# Launched via: make local-dev
+#
+# Meilisearch runs in Docker under Overmind. Everything else runs natively.
+
+meilisearch: bash scripts/dev/meilisearch.sh local-dev
+hardhat: bash scripts/dev/hardhat.sh local-dev
+contracts: bash scripts/dev/contracts.sh local-dev
+frontend: bash scripts/dev/frontend.sh local-dev
+backend: bash scripts/dev/backend.sh local-dev

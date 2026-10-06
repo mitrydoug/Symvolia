@@ -1,15 +1,25 @@
 import { FC } from "react";
+import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Stack from "@mui/material/Stack";
 import ButtonBase from "@mui/material/ButtonBase";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import ArrowDropUpIcon from "@mui/icons-material/ArrowDropUp";
+import ArrowDropDownIcon from "@mui/icons-material/ArrowDropDown";
+import CloseIcon from "@mui/icons-material/Close";
 
 interface VoteToggleProps {
   userSupport: number;
   uncommittedSupport: boolean;
   onUserVoteChange: (newVoteCount: number) => void;
-  direction?: "horizontal" | "vertical";
+  direction?: "horizontal" | "vertical" | "compact";
+  /**
+   * When provided (compact variant), renders an integrated clear (×) segment
+   * on the left of the pill. Its width is reserved even when hidden so the
+   * −/+ controls never shift.
+   */
+  onClear?: () => void;
 }
 
 interface SupportButtonProps {
@@ -62,7 +72,98 @@ const VoteToggle: FC<VoteToggleProps> = ({
   uncommittedSupport,
   onUserVoteChange,
   direction = "horizontal",
+  onClear,
 }) => {
+  if (direction === "compact") {
+    const numberColor =
+      userSupport > 0
+        ? "success.main"
+        : userSupport < 0
+          ? "error.main"
+          : "text.secondary";
+    const canClear = Boolean(onClear);
+    const showClear = canClear && userSupport !== 0;
+
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          borderRadius: 999,
+          bgcolor: "action.hover",
+          border: "1px solid",
+          borderColor: "transparent",
+          px: 0.75,
+        }}
+      >
+        {showClear && (
+          <Box
+            sx={{
+              width: 14,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <ButtonBase
+              aria-label="Clear support"
+              onClick={onClear}
+              sx={{
+                width: 14,
+                height: 14,
+                borderRadius: "50%",
+                color: "text.disabled",
+                "&:hover": { color: "text.primary" },
+              }}
+            >
+              <CloseIcon sx={{ fontSize: 12 }} />
+            </ButtonBase>
+          </Box>
+        )}
+        <ButtonBase
+          aria-label="Decrease support"
+          onClick={() => onUserVoteChange(userSupport - 1)}
+          sx={{
+            width: 14,
+            height: 22,
+            borderRadius: 1,
+            color: "text.secondary",
+            "&:hover": { color: "error.main" },
+          }}
+        >
+          <ArrowDropDownIcon sx={{ fontSize: 24 }} />
+        </ButtonBase>
+        <Typography
+          variant="body2"
+          sx={{
+            fontWeight: uncommittedSupport ? 700 : 600,
+            minWidth: 12,
+            mx: 0.5,
+            textAlign: "center",
+            color: numberColor,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {userSupport}
+        </Typography>
+        <ButtonBase
+          aria-label="Increase support"
+          onClick={() => onUserVoteChange(userSupport + 1)}
+          sx={{
+            width: 14,
+            height: 22,
+            borderRadius: 1,
+            color: "text.secondary",
+            "&:hover": { color: "success.main" },
+          }}
+        >
+          <ArrowDropUpIcon sx={{ fontSize: 24 }} />
+        </ButtonBase>
+      </Box>
+    );
+  }
+
   if (direction === "vertical") {
     const numberColor =
       userSupport > 0
@@ -74,8 +175,11 @@ const VoteToggle: FC<VoteToggleProps> = ({
     return (
       <Stack alignItems="center" spacing={0}>
         <ButtonBase
+          aria-label="Increase support"
           onClick={() => onUserVoteChange(userSupport + 1)}
           sx={{
+            width: 32,
+            height: 28,
             color: "text.secondary",
             "&:hover": { color: "success.main" },
           }}
@@ -93,8 +197,11 @@ const VoteToggle: FC<VoteToggleProps> = ({
           {userSupport}
         </Typography>
         <ButtonBase
+          aria-label="Decrease support"
           onClick={() => onUserVoteChange(userSupport - 1)}
           sx={{
+            width: 32,
+            height: 28,
             color: "text.secondary",
             "&:hover": { color: "error.main" },
           }}

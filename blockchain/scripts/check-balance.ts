@@ -1,41 +1,64 @@
 /**
- * Pre-deploy balance check for the Sepolia deployer account.
+ * Pre-deploy balance check for live-network deployer accounts.
  *
- * Reads SEPOLIA_RPC_URL and SEPOLIA_DEPLOYER_PRIVATE_KEY from the environment,
- * derives the deployer address, checks its ETH balance, and exits with an error
- * if the balance is below a minimum threshold.
- *
- * Usage: npx tsx scripts/check-balance.ts
+ * Usage:
+ *   npx tsx scripts/check-balance.ts base
+ *   npx tsx scripts/check-balance.ts base_sepolia
  */
 
-import { createPublicClient, http, formatEther } from "viem";
+import { createPublicClient, formatEther, http, type Chain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { sepolia } from "viem/chains";
+import { base, baseSepolia } from "viem/chains";
 
-const MIN_BALANCE_WEI = BigInt("100000000000000000"); // 0.1 Sepolia ETH
+const MIN_BALANCE_WEI = BigInt("1000000000000000"); // 0.001 ETH
+
+const targets: Record<
+  string,
+  { chain: Chain; rpcEnv: string; privateKeyEnv: string }
+> = {
+  base: {
+    chain: base,
+    rpcEnv: "BASE_RPC_URL",
+    privateKeyEnv: "BASE_DEPLOYER_PRIVATE_KEY",
+  },
+  base_sepolia: {
+    chain: baseSepolia,
+    rpcEnv: "BASE_SEPOLIA_RPC_URL",
+    privateKeyEnv: "BASE_SEPOLIA_DEPLOYER_PRIVATE_KEY",
+  },
+};
 
 async function main() {
-  const rpcUrl = process.env.SEPOLIA_RPC_URL;
-  const privateKey = process.env.SEPOLIA_DEPLOYER_PRIVATE_KEY;
+  const target = process.argv[2] ?? "base";
+  const targetConfig = targets[target];
+  if (!targetConfig) {
+    console.error(`❌ Unknown balance-check target "${target}".`);
+    console.error(`Known targets: ${Object.keys(targets).join(", ")}`);
+    process.exit(1);
+  }
+
+  const rpcUrl = process.env[targetConfig.rpcEnv];
+  const privateKey = process.env[targetConfig.privateKeyEnv];
 
   if (!rpcUrl) {
-    console.error("❌ SEPOLIA_RPC_URL is not set.");
+    console.error(`❌ ${targetConfig.rpcEnv} is not set.`);
     process.exit(1);
   }
   if (!privateKey) {
-    console.error("❌ SEPOLIA_DEPLOYER_PRIVATE_KEY is not set.");
+    console.error(`❌ ${targetConfig.privateKeyEnv} is not set.`);
     process.exit(1);
   }
 
   const account = privateKeyToAccount(privateKey as `0x${string}`);
   const client = createPublicClient({
-    chain: sepolia,
+    chain: targetConfig.chain,
     transport: http(rpcUrl),
   });
 
   const balance = await client.getBalance({ address: account.address });
   const balanceEth = formatEther(balance);
 
+  console.log(`Target: ${target}`);
   console.log(`Deployer address: ${account.address}`);
   console.log(`Balance: ${balanceEth} ETH`);
 
@@ -43,12 +66,12 @@ async function main() {
     console.error(
       `\n❌ Insufficient funds: ${balanceEth} ETH is below the minimum ` +
       `threshold of ${formatEther(MIN_BALANCE_WEI)} ETH.\n` +
-      `Please fund the deployer wallet before running the deployment.`,
+      `Please fund the deployer wallet before running reconciliation.`,
     );
     process.exit(1);
   }
 
-  console.log("✅ Balance is sufficient for deployment.");
+  console.log("✅ Balance is sufficient for reconciliation.");
 }
 
 main().catch((err) => {

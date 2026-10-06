@@ -1,0 +1,11 @@
+# Local development — Base Sepolia fork with dev-registry topology.
+# Launched via: make local-forked
+#
+# Requires BASE_SEPOLIA_RPC_URL in .env.local (gitignored).
+# Meilisearch runs in Docker under Overmind. Everything else runs natively.
+
+meilisearch: bash scripts/dev/meilisearch.sh local-forked
+hardhat: bash scripts/dev/hardhat.sh local-forked
+contracts: bash scripts/dev/contracts.sh local-forked
+frontend: bash scripts/dev/frontend.sh local-forked
+backend: bash scripts/dev/backend.sh local-forked

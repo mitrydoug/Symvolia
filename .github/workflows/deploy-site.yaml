@@ -2,9 +2,11 @@ name: Deploy static site to IPFS
 
 on:
   workflow_run:
-    workflows: ["Deploy smart contracts to Sepolia"]
+    workflows: ["Reconcile smart contracts"]
     types: [completed]
-    branches: [release]
+    branches:
+      - develop
+      - release
 
   # Allow manual re-runs (e.g. after fixing a Pinata issue)
   workflow_dispatch:
@@ -19,8 +21,11 @@ permissions:
 
 # Prevent parallel deploys
 concurrency:
-  group: "site-deploy"
+  group: site-deploy-${{ github.event.workflow_run.head_branch || inputs.branch || 'release' }}
   cancel-in-progress: false
+
+env:
+  DEPLOY_BRANCH: ${{ github.event.workflow_run.head_branch || inputs.branch || 'release' }}
 
 jobs:
   build:
@@ -37,12 +42,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch || 'release' }}
+          ref: ${{ env.DEPLOY_BRANCH }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
@@ -58,9 +63,23 @@ jobs:
       - name: Check formatting
         run: npm run format:check
 
+      - name: Configure frontend deployment environment
+        run: |
+          case "${DEPLOY_BRANCH}" in
+            develop) PROFILE=develop ;;
+            release) PROFILE=release ;;
+            *) echo "Unsupported site deployment branch: ${DEPLOY_BRANCH}"; exit 1 ;;
+          esac
+          . ../scripts/profile-env.sh
+          load_profile_env "${PROFILE}"
+          # Profile REQUIRE validated the secrets; persist all VITE_ build vars
+          # so the later Build step sees them.
+          printenv | grep -E '^VITE_' >> "${GITHUB_ENV}"
+
+      - name: Compute app version
+        run: echo "VITE_APP_VERSION=$(node ../scripts/app-version.mjs)" >> "${GITHUB_ENV}"
+
       - name: Build
-        env:
-          VITE_SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
         run: npm run build
 
       - name: Upload build artifact
@@ -81,12 +100,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch || 'release' }}
+          ref: ${{ env.DEPLOY_BRANCH }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
@@ -106,6 +125,74 @@ jobs:
           PINATA_GATEWAY: ${{ secrets.PINATA_GATEWAY }}
         run: npx tsx scripts/pin-to-ipfs.ts dist
 
+  deploy-worker:
+    needs: pin-ipfs
+    # Deploys the test Worker (test-symvolia → test.symvolia.org), fed by the
+    # develop branch. The production site (symvolia.org) is handled by the
+    # separate deploy-worker-prod job below, gated to the release branch.
+    if: ${{ (github.event.workflow_run.head_branch || inputs.branch || 'release') == 'develop' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare-worker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_BRANCH }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "npm"
+          cache-dependency-path: cloudflare-worker/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy Worker with new CID
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: e753937da094d1611ac0bc7cf64f008f
+          CID: ${{ needs.pin-ipfs.outputs.cid }}
+        run: npx wrangler deploy --env test --var IPFS_CID:"$CID"
+
+  deploy-worker-prod:
+    needs: pin-ipfs
+    # Deploys the production Worker (symvolia → symvolia.org), fed by the
+    # release branch. Mirrors deploy-worker but targets the `production`
+    # Wrangler environment (see cloudflare-worker/wrangler.jsonc). IPFS_GATEWAY,
+    # CSP_MODE, and the symvolia.org custom-domain route come from that env
+    # block; only IPFS_CID is overridden per deploy.
+    if: ${{ (github.event.workflow_run.head_branch || inputs.branch || 'release') == 'release' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare-worker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_BRANCH }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "npm"
+          cache-dependency-path: cloudflare-worker/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy Worker with new CID
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: e753937da094d1611ac0bc7cf64f008f
+          CID: ${{ needs.pin-ipfs.outputs.cid }}
+        run: npx wrangler deploy --env production --var IPFS_CID:"$CID"
+
   publish-release:
     needs: pin-ipfs
     runs-on: ubuntu-latest
@@ -115,25 +202,54 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch || 'release' }}
+          ref: ${{ env.DEPLOY_BRANCH }}
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           CID: ${{ needs.pin-ipfs.outputs.cid }}
           PINATA_GATEWAY: ${{ secrets.PINATA_GATEWAY }}
+          REPO: ${{ github.repository }}
         run: |
-          TAG="site-$(date -u +%Y%m%d-%H%M%S)"
+          APP_VERSION="$(node scripts/app-version.mjs)"
+          CONTRACT_NOTES="$(node scripts/release-contract-notes.mjs)"
+          TAG="v${APP_VERSION}"
+          TITLE="Symvolia ${APP_VERSION}"
           GATEWAY="https://${PINATA_GATEWAY}/ipfs/${CID}"
           PUBLIC="https://ipfs.io/ipfs/${CID}"
+          SITE_URL="${PUBLIC}"
 
-          gh release create "$TAG" \
-            --title "Site Deployment — ${TAG}" \
-            --notes "## Frontend deployed to IPFS
+          # On the develop branch the build is published to the public test site.
+          RELEASE_ARGS=""
+          if [ "${DEPLOY_BRANCH}" = "develop" ]; then
+            SITE_URL="https://test.symvolia.org/ipfs/${CID}"
+            RELEASE_ARGS="--prerelease"
+          elif [ "${DEPLOY_BRANCH}" = "release" ]; then
+            # The production Worker (deploy-worker-prod) serves this CID at the
+            # apex domain, so link releases there rather than the raw gateway.
+            SITE_URL="https://symvolia.org"
+          fi
 
-          **CID:** \`${CID}\`
+          NOTES=$(printf '%s\n' \
+            '## Frontend deployed to IPFS' \
+            '' \
+            "**Version:** ${APP_VERSION}" \
+            '' \
+            "**IPFS cid:** \`${CID}\`" \
+            '' \
+            "**Site:** ${SITE_URL}" \
+            '' \
+            "$CONTRACT_NOTES")
 
-          **Access the site:**
-          - [Pinata Gateway](${GATEWAY})
-          - [Public Gateway](${PUBLIC})
-          - Local IPFS node: \`ipfs cat ${CID}\`"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --repo "$REPO" \
+              --title "$TITLE" \
+              --notes "$NOTES"
+          else
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              ${RELEASE_ARGS}
+          fi

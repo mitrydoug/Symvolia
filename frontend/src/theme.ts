@@ -1,5 +1,7 @@
 import { createTheme } from "@mui/material";
 
+export const THEME_MODE_STORAGE_KEY = "symvolia:settings:theme";
+
 // Type augmentation for custom theme tokens
 declare module "@mui/material/styles" {
   interface Theme {
@@ -33,6 +35,22 @@ declare module "@mui/material/styles" {
       };
       sideNav: {
         width: number;
+      };
+      colors: {
+        allocation: {
+          allocated: string;
+          unallocated: string;
+          stagedIncrease: string;
+          stagedDecrease: string;
+        };
+        credit: {
+          light: string;
+          main: string;
+        };
+        stagedSupport: {
+          light: string;
+          dark: string;
+        };
       };
     };
   }
@@ -68,6 +86,22 @@ declare module "@mui/material/styles" {
       sideNav?: {
         width?: number;
       };
+      colors?: {
+        allocation?: {
+          allocated?: string;
+          unallocated?: string;
+          stagedIncrease?: string;
+          stagedDecrease?: string;
+        };
+        credit?: {
+          light?: string;
+          main?: string;
+        };
+        stagedSupport?: {
+          light?: string;
+          dark?: string;
+        };
+      };
     };
   }
 }
@@ -90,7 +124,13 @@ export const theme = createTheme({
         },
       },
     },
-    dark: true,
+    dark: {
+      palette: {
+        primary: {
+          main: "#4D7EA8",
+        },
+      },
+    },
   },
   typography: {
     fontFamily: "'Inter', sans-serif",
@@ -100,10 +140,18 @@ export const theme = createTheme({
       defaultProps: {
         variant: "contained",
         size: "small",
-        sx: { textTransform: "none" },
+      },
+      styleOverrides: {
+        root: {
+          textTransform: "none",
+        },
       },
     },
     MuiAvatar: {
+      defaultProps: {
+        // Square avatars with softly rounded corners (no longer circular).
+        variant: "rounded",
+      },
       styleOverrides: {
         root: ({ theme }) => ({
           width: 40,
@@ -125,14 +173,14 @@ export const theme = createTheme({
     appBar: {
       logoIcon: {
         size: {
-          mobile: "2rem",
-          desktop: "2.75rem",
+          mobile: "1.3rem",
+          desktop: "1.5rem",
         },
       },
       logoText: {
         size: {
-          mobile: "1.8rem",
-          desktop: "2.125rem",
+          mobile: "1.5rem",
+          desktop: "1.625rem",
         },
       },
       spacing: {
@@ -141,7 +189,7 @@ export const theme = createTheme({
       },
     },
     statementList: {
-      endIndicatorPadding: 1,
+      endIndicatorPadding: 4,
     },
     layout: {
       contentGap: {
@@ -151,6 +199,29 @@ export const theme = createTheme({
     },
     sideNav: {
       width: 220,
+    },
+    colors: {
+      // Support-allocation bar segments. Kept in distinct hue families so
+      // segment boundaries stay legible even without a staged segment between.
+      allocation: {
+        allocated: "#2e7d32", // green
+        unallocated: "#749fc4", // theme blue (matches palette.primary.main)
+        // Staged is a muted/greyed tint of the direction it moves toward.
+        stagedIncrease: "#9cbfa0", // greyed green (allocation growing)
+        stagedDecrease: "#a3bacd", // greyed blue (allocation shrinking)
+      },
+      // Credits coin icon.
+      credit: {
+        light: "#FBBF24",
+        main: "#F59E0B",
+      },
+      // Marker for statement cards with staged (uncommitted) support
+      // adjustments — a deep "construction zone" safety orange. Darkened in
+      // dark mode so it doesn't glow against the dark surface.
+      stagedSupport: {
+        light: "#ffa31a",
+        dark: "#b35900",
+      },
     },
   },
 });

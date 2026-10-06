@@ -1,0 +1,15 @@
+{
+  "name": "symvolia-ipfs-proxy",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Cloudflare Worker that serves the IPFS-pinned Symvolia frontend from a clean custom domain.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

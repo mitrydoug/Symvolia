@@ -8,8 +8,9 @@
  */
 
 import ForumABI from "./abis/Forum";
-import OurVoiceRegistryABI from "./abis/OurVoiceRegistry";
-import MockOurVoiceRegistryABI from "./abis/MockOurVoiceRegistry";
+import SymvoliaRegistryABI from "./abis/SymvoliaRegistry";
+import MockSymvoliaRegistryABI from "./abis/MockSymvoliaRegistry";
+import DevSymvoliaRegistryABI from "./abis/DevSymvoliaRegistry";
 
 // ---------------------------------------------------------------------------
 // Network addresses — resolved at build time via import.meta.glob so that
@@ -34,7 +35,7 @@ if (!activeNetwork) {
     .join(", ");
   throw new Error(
     `Network "${networkName}" not found. ` +
-      `Run the deploy script or set VITE_NETWORK. Available: ${available}`,
+    `Run the deploy script or set VITE_NETWORK. Available: ${available}`,
   );
 }
 
@@ -42,25 +43,39 @@ export const FORUMS = activeNetwork.FORUMS;
 
 const REGISTRY_ADDRESS = activeNetwork.REGISTRY_ADDRESS;
 
-/** true when the frontend targets a MockOurVoiceRegistry deployment. */
-export const isDevMode = import.meta.env.VITE_REGISTRY_MODE !== "production";
+const registryMode = import.meta.env.VITE_REGISTRY_MODE ?? "dev";
+
+/**
+ * true when the frontend targets a non-production registry (dev or mock).
+ * Controls the ZKPassport SDK `devMode` flag so dev/mock proofs are accepted.
+ */
+export const isDevMode = registryMode !== "production";
+
+/**
+ * true when the frontend targets the address-derived DevSymvoliaRegistry,
+ * which exposes the instant `register(string)` quick-register flow. The "mock"
+ * and "production" modes both use the full ZKPassport proof flow instead.
+ */
+export const isQuickRegisterMode = registryMode === "dev";
 
 export const FORUM_ABI = ForumABI;
 
 /**
- * Contract config for the production OurVoiceRegistry.
- * `register()` expects `ProofVerificationParams` from zkpassport.
+ * Contract config for the active proof-based registry. `register()` expects
+ * `ProofVerificationParams` from zkpassport. Used by both production
+ * (SymvoliaRegistry) and mock (MockSymvoliaRegistry) modes; the mock ABI is
+ * selected in "mock" mode so its custom errors decode correctly.
  */
 export const registryContractConfig = {
   address: REGISTRY_ADDRESS,
-  abi: OurVoiceRegistryABI,
+  abi: registryMode === "mock" ? MockSymvoliaRegistryABI : SymvoliaRegistryABI,
 } as const;
 
 /**
- * Contract config for the MockOurVoiceRegistry (dev/test only).
- * `register()` accepts a plain nationality string.
+ * Contract config for the DevSymvoliaRegistry (dev mode only).
+ * `register()` accepts a plain nationality string for instant registration.
  */
-export const mockRegistryContractConfig = {
+export const devRegistryContractConfig = {
   address: REGISTRY_ADDRESS,
-  abi: MockOurVoiceRegistryABI,
+  abi: DevSymvoliaRegistryABI,
 } as const;

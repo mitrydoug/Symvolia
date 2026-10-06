@@ -24,8 +24,8 @@
 # cache for edr-simulated network
 /edr-fork-cache
 
-# Ephemeral local deployment state (Hardhat default network, chain 31337)
-/ignition/deployments/chain-31337
-
-# Production deployment state (Sepolia, chain 11155111) — DO commit this
-# !ignition/deployments/chain-11155111/
+# Ignition deployment state (all chains) — ignored for now. The source of truth
+# for deployed addresses lives in deployments/<network>.json. To start tracking
+# a specific chain's on-chain deployment ledger, add a negation below, e.g.
+# !/ignition/deployments/chain-8453/
+/ignition/deployments/

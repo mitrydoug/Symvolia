@@ -1,0 +1,90 @@
+name: Publish backend Docker image
+
+on:
+  push:
+    branches:
+      - develop
+      - release
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/symvolia-backend
+
+concurrency:
+  group: backend-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check publish branch
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "develop" ] && [ "${GITHUB_REF_NAME}" != "release" ]; then
+            echo "Backend images can only be published from develop or release. Current branch: ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute app version
+        id: app_version
+        run: echo "value=$(node scripts/app-version.mjs)" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          load: true
+          tags: symvolia-backend:publish-check
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test backend image
+        run: >-
+          docker run --rm
+          -e MEILI_URL=http://localhost:7700 -e MEILI_API_KEY=ci
+          symvolia-backend:publish-check python -c
+          "import symvolia.combined, symvolia.search_service.main, symvolia.main; print('backend imports ok')"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=false
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=${{ steps.app_version.outputs.value }}
+            type=raw,value=latest,enable=${{ github.ref_name == 'release' }}
+
+      - name: Build and publish backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

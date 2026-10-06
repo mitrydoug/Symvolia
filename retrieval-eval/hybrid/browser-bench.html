@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <title>MiniLM in-browser embedding benchmark</title>
+</head>
+
+<body>
+  <h1>Embedding benchmark</h1>
+  <pre id="out">starting…</pre>
+  <script type="module">
+    import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
+    env.allowLocalModels = false;
+
+    const out = document.getElementById("out");
+    const log = (m) => {
+      out.textContent += "\n" + m;
+      console.log(m);
+    };
+
+    // Build 2000 short statements (avg ~59 chars, like real forum posts).
+    const subjects = ["The government", "This proposal", "Local councils", "The community", "Voters", "The committee", "Our schools", "The new policy", "Public transit", "The budget"];
+    const verbs = ["should prioritize", "must reconsider", "will benefit from", "cannot ignore", "needs to fund", "ought to protect", "risks harming", "could improve", "fails to address", "depends on"];
+    const objects = ["affordable housing for families", "clean drinking water access", "renewable energy investment", "safe pedestrian infrastructure", "transparent public records", "small business support", "mental health services", "the long-term climate outlook", "equitable tax reform", "childhood education funding"];
+    const texts = [];
+    for (let i = 0; i < 2000; i++) {
+      texts.push(
+        `${subjects[i % subjects.length]} ${verbs[(i * 7) % verbs.length]} ${objects[(i * 13) % objects.length]}.`,
+      );
+    }
+    log(`corpus: ${texts.length} statements, avg ${Math.round(texts.reduce((a, t) => a + t.length, 0) / texts.length)} chars`);
+
+    window.__benchDone = false;
+    (async () => {
+      const t0 = performance.now();
+      const extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+      const t1 = performance.now();
+      log(`model load + init: ${((t1 - t0) / 1000).toFixed(2)}s`);
+
+      const batchSize = 32;
+      const embStart = performance.now();
+      for (let i = 0; i < texts.length; i += batchSize) {
+        const batch = texts.slice(i, i + batchSize);
+        await extractor(batch, { pooling: "mean", normalize: true });
+      }
+      const embEnd = performance.now();
+      const embSecs = (embEnd - embStart) / 1000;
+      log(`embed 2000 (batch ${batchSize}): ${embSecs.toFixed(2)}s  (${(embSecs * 1000 / 2000).toFixed(2)} ms/each, ${Math.round(2000 / embSecs)}/s)`);
+      log(`TOTAL cold-start (load + embed): ${((embEnd - t0) / 1000).toFixed(2)}s`);
+      window.__benchResult = {
+        load: (t1 - t0) / 1000,
+        embed: embSecs,
+        total: (embEnd - t0) / 1000,
+      };
+      window.__benchDone = true;
+    })().catch((e) => {
+      log("ERROR: " + (e && e.message ? e.message : String(e)));
+      window.__benchDone = true;
+      window.__benchError = String(e);
+    });
+  </script>
+</body>
+
+</html>
