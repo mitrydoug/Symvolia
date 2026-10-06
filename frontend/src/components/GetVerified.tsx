@@ -58,7 +58,19 @@ import AndroidIcon from "@mui/icons-material/Android";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const MY_ICON_URL = "https://i.imgur.com/I86xH4n.png";
+// Symvolia icon shown in the zkPassport mobile app during verification. The
+// app fetches this URL from the user's phone, so it must be an absolute,
+// publicly reachable URL (a relative path or `localhost` won't resolve on the
+// phone). In production we serve it from the current origin (symvolia.org);
+// for local dev / non-public origins we fall back to the public test
+// deployment so the phone can still load it.
+const PUBLIC_LOGO_FALLBACK_ORIGIN = "https://test.symvolia.org";
+const logoOrigin =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1"
+    ? PUBLIC_LOGO_FALLBACK_ORIGIN
+    : window.location.origin;
+const SYMVOLIA_LOGO_URL = new URL("/symvolia-icon.png", logoOrigin).toString();
 const MY_SCOPE = "symvolia-verify";
 
 const ZKPASSPORT_URL = "https://zkpassport.id";
@@ -748,7 +760,7 @@ const StepScanVerify: FC<{
       const queryBuilder = await zkPassport.request({
         name: "Symvolia",
         purpose: "Roll call",
-        logo: MY_ICON_URL,
+        logo: SYMVOLIA_LOGO_URL,
         scope: MY_SCOPE,
         mode: "compressed-evm",
         devMode: isDevMode,

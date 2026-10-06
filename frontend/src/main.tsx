@@ -11,7 +11,6 @@ import { WagmiProvider } from "@privy-io/wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import wagmiConfig, {
   blockPollingIntervalMs,
-  privyAppClientId,
   privyAppId,
   privyConfig,
   smartWalletsConfig,
@@ -43,11 +42,7 @@ const app = !privyAppId ? (
     to enable wallet login.
   </div>
 ) : (
-  <PrivyProvider
-    appId={privyAppId}
-    clientId={privyAppClientId}
-    config={privyConfig}
-  >
+  <PrivyProvider appId={privyAppId} config={privyConfig}>
     <SmartWalletsProvider config={smartWalletsConfig}>
       <QueryClientProvider client={queryClient}>
         <WagmiProvider config={wagmiConfig}>

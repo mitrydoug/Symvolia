@@ -66,6 +66,46 @@ must be run manually with explicit review. Before that can happen,
 `ignition/parameters/base.json` must contain the approved production verifier,
 scope, domain, and `devMode` values.
 
+### Test the production flow on a Base mainnet fork (no real ETH)
+
+Run the full production registry locally against a fork of Base mainnet. Both
+targets fork from `BASE_RPC_URL` (put it in `.env.local`) and report chainId
+`31337`, so their Ignition journals can never collide with the real chain-8453
+state, and they spend no real ETH.
+
+```bash
+# One-shot: deploy the production profile against the fork, verify the registry
+# (scope / domain / devMode / verifier) and forum wiring, and report gas.
+make base-fork-dry-run
+
+# Full local dev env (frontend + backend + relay) on the fork, running the REAL
+# SymvoliaRegistry wired to the forked Base-mainnet zkPassport verifier.
+make base-fork
+```
+
+`make base-fork` deploys the `base-fork` profile (registry `domain = "localhost"`,
+`devMode = false`, real verifier) and serves the app with `VITE_REGISTRY_MODE=
+production`. Open the frontend at `http://localhost:<port>` (not `127.0.0.1`) so
+the proof's committed domain (`localhost`), subscope (`symvolia-verify`), and
+chain binding (`local` = chainId `31337`) all match the deployed registry. You
+can then exercise the real zkPassport registration proof against the production
+verifier end to end. Import a funded Hardhat dev account into your wallet to pay
+for gas (gas sponsorship is off on the local fork).
+
+### Initial mainnet deploy (break glass)
+
+The first real registry + forum deployment is irreversible. Run it manually from
+the repository root with the explicit confirmation variable (and the deployer
+env vars exported for the balance pre-check):
+
+```bash
+CONFIRM_BASE_MAINNET_DEPLOY=I_UNDERSTAND_THIS_IS_REAL_MAINNET make base-break-glass
+```
+
+This checks the deployer balance, compiles with the production profile, performs
+a `FORCE_FRESH_DEPLOY` of the `base` profile to Base Mainnet, and regenerates the
+deployment and backend env artifacts.
+
 ## Reconcile Missing Forums
 
 After an initial deployment artifact exists, deploy only missing forums with:

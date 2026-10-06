@@ -1,0 +1,14 @@
+# Local development — Base MAINNET fork running the real production registry.
+# Launched via: make base-fork
+#
+# Requires BASE_RPC_URL in .env.local (gitignored). Deploys the real
+# SymvoliaRegistry against the forked Base-mainnet zkPassport verifier so the
+# full on-chain proof verification path can be tested locally. Open the frontend
+# at http://localhost:<port> so the committed proof domain ("localhost") matches.
+# Meilisearch runs in Docker under Overmind. Everything else runs natively.
+
+meilisearch: bash scripts/dev/meilisearch.sh base-fork
+hardhat: bash scripts/dev/hardhat.sh base-fork
+contracts: bash scripts/dev/contracts.sh base-fork
+frontend: bash scripts/dev/frontend.sh base-fork
+backend: bash scripts/dev/backend.sh base-fork

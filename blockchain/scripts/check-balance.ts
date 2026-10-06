@@ -10,7 +10,7 @@ import { createPublicClient, formatEther, http, type Chain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { base, baseSepolia } from "viem/chains";
 
-const MIN_BALANCE_WEI = BigInt("100000000000000000"); // 0.1 ETH
+const MIN_BALANCE_WEI = BigInt("1000000000000000"); // 0.001 ETH
 
 const targets: Record<
   string,
