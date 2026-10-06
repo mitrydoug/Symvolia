@@ -101,11 +101,7 @@ export const privyConfig = {
     accentColor: "#1976d2",
     showWalletLoginFirst: false,
     walletChainType: "ethereum-only",
-    walletList: [
-      "detected_wallets",
-      "metamask",
-      "coinbase_wallet",
-    ],
+    walletList: ["detected_wallets", "metamask", "coinbase_wallet"],
   },
   loginMethods: ["email", "wallet", "passkey"],
   supportedChains: [targetChain],
