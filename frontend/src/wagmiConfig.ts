@@ -105,11 +105,9 @@ export const privyConfig = {
       "detected_wallets",
       "metamask",
       "coinbase_wallet",
-      "wallet_connect",
     ],
   },
   loginMethods: ["email", "wallet", "passkey"],
-  walletConnectCloudProjectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID,
   supportedChains: [targetChain],
   defaultChain: targetChain,
   embeddedWallets: {

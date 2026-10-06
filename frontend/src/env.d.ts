@@ -23,9 +23,6 @@ interface ImportMetaEnv {
   /** Local backend RPC relay URL for the selected VITE_NETWORK. */
   readonly VITE_RPC_URL?: string;
 
-  /** WalletConnect projectId. Get a free one at https://cloud.walletconnect.com */
-  readonly VITE_WALLETCONNECT_PROJECT_ID?: string;
-
   /** Privy app ID for embedded wallet and external wallet login. */
   readonly VITE_PRIVY_APP_ID?: string;
 
