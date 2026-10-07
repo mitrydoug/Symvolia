@@ -56,6 +56,10 @@ const CONTENT_SECURITY_POLICY = [
   [
     "frame-src 'self'",
     "https://*.privy.io",
+    // Privy custom auth domain (configured in the Privy dashboard) — Privy
+    // frames its embedded-wallet UI and routes API traffic through it instead
+    // of *.privy.io, so it must be allowlisted alongside the privy.io hosts.
+    "https://privy.symvolia.org",
     "https://verify.walletconnect.com",
     "https://verify.walletconnect.org",
     "https://challenges.cloudflare.com",
@@ -63,6 +67,9 @@ const CONTENT_SECURITY_POLICY = [
   [
     "connect-src 'self'",
     "https://*.privy.io",
+    // Privy custom auth domain — SDK fetches (passwordless/init, analytics,
+    // etc.) go here rather than *.privy.io.
+    "https://privy.symvolia.org",
     "https://*.rpc.privy.systems",
     "https://*.walletconnect.com",
     "https://*.walletconnect.org",
