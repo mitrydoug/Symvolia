@@ -28,6 +28,17 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
       buffer: "buffer",
+      // Privy's OPTIONAL `@farcaster/mini-app-solana` peer dep is never
+      // installed (Symvolia is EVM-only). With `inlineDynamicImports`, Rollup
+      // must resolve Privy's `await import("@farcaster/mini-app-solana")` at
+      // build time; unresolved it becomes a throwing stub that crashes the
+      // PrivyProvider. Alias it to an empty module so the import resolves
+      // cleanly and Privy takes its "Solana unavailable" path. (The `@solana/*`
+      // peers ARE installed, so they must NOT be stubbed.)
+      "@farcaster/mini-app-solana": path.resolve(
+        __dirname,
+        "./src/stubs/solana-optional-empty.js",
+      ),
       // Transformers.js `main` points at raw ./src (Node ESM that does
       // `import fs from 'fs'` then `Object.keys(fs)` — which throws in the
       // browser, and whose onnxruntime dep needs CJS interop). Point at the

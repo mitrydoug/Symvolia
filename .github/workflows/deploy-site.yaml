@@ -77,6 +77,12 @@ jobs:
           printenv | grep -E '^VITE_' >> "${GITHUB_ENV}"
 
       - name: Compute app version
+        # workflow_run runs in the default-branch (develop) context, so
+        # GITHUB_REF_NAME/GITHUB_SHA point at develop even for release deploys.
+        # Pin app-version.mjs to the branch actually being deployed so release
+        # builds resolve to the bare `0.1.0` (not `0.1.0-dev.<sha>`).
+        env:
+          APP_VERSION_REF_NAME: ${{ env.DEPLOY_BRANCH }}
         run: echo "VITE_APP_VERSION=$(node ../scripts/app-version.mjs)" >> "${GITHUB_ENV}"
 
       - name: Build
@@ -210,10 +216,17 @@ jobs:
           CID: ${{ needs.pin-ipfs.outputs.cid }}
           PINATA_GATEWAY: ${{ secrets.PINATA_GATEWAY }}
           REPO: ${{ github.repository }}
+          # See "Compute app version" above: force the deployed branch so the
+          # release tag/title match the site build (release -> 0.1.0).
+          APP_VERSION_REF_NAME: ${{ env.DEPLOY_BRANCH }}
         run: |
           APP_VERSION="$(node scripts/app-version.mjs)"
           CONTRACT_NOTES="$(node scripts/release-contract-notes.mjs)"
           TAG="v${APP_VERSION}"
+          # The checkout above is at DEPLOY_BRANCH head; pin the tag to that
+          # exact commit so the release points at the deployed branch head
+          # rather than the repo default branch (develop).
+          TARGET_SHA="$(git rev-parse HEAD)"
           TITLE="Symvolia ${APP_VERSION}"
           GATEWAY="https://${PINATA_GATEWAY}/ipfs/${CID}"
           PUBLIC="https://ipfs.io/ipfs/${CID}"
@@ -249,6 +262,7 @@ jobs:
           else
             gh release create "$TAG" \
               --repo "$REPO" \
+              --target "$TARGET_SHA" \
               --title "$TITLE" \
               --notes "$NOTES" \
               ${RELEASE_ARGS}
