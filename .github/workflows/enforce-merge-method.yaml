@@ -1,0 +1,39 @@
+name: Enforce merge method
+
+# Guards the branching model documented in CONTRIBUTING.md:
+#   - Every change landing on `release` must arrive via a merge commit
+#     (develop -> release promotions, or hotfix -> release).
+#   - Squash and fast-forward merges collapse history into a single-parent
+#     commit, which severs `release`'s shared ancestry with `develop` and
+#     makes the next promotion PR show develop's entire history.
+#
+# A merge commit has 2+ parents; squash/rebase/fast-forward produce exactly 1.
+# This is a detective control: it runs after the push and fails loudly so the
+# mistake is caught immediately. Pair it with a required status check on
+# `release` (see CONTRIBUTING.md) to make it blocking.
+
+on:
+  push:
+    branches:
+      - release
+
+  # Allow manual re-validation of the current release HEAD.
+  workflow_dispatch:
+
+jobs:
+  require-merge-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Require a merge commit on release
+        run: |
+          parents="$(git cat-file -p HEAD | grep -c '^parent ')"
+          echo "HEAD $(git rev-parse --short HEAD) has ${parents} parent(s)."
+          if [ "${parents}" -lt 2 ]; then
+            echo "::error::Pushes to 'release' must be merge commits. This commit has ${parents} parent(s), which means it was squash-, rebase-, or fast-forward-merged. Re-do the promotion with 'Create a merge commit'."
+            exit 1
+          fi
+          echo "OK: release HEAD is a merge commit."
