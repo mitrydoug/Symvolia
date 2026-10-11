@@ -1,4 +1,4 @@
-import { FC, useEffect, useState } from "react";
+import { FC, useEffect } from "react";
 import Box from "@mui/material/Box";
 import { Button, CircularProgress, Fab, Tooltip } from "@mui/material";
 import { Outlet, useLocation, useParams } from "react-router-dom";
@@ -7,7 +7,6 @@ import CreateIcon from "@mui/icons-material/Create";
 import MenuAppBar from "./AppBar";
 import SideNav from "./SideNav";
 import BottomNav from "./BottomNav";
-import CreateStatementModal from "./CreateStatementModal";
 import SearchField from "./SearchField";
 import UserProfilePanel from "./UserProfilePanel";
 import CreditActionPanel from "./CreditActionPanel";
@@ -18,6 +17,7 @@ import CommitSupportModal from "./CommitSupportModal";
 import OutdatedChangesModal from "./OutdatedChangesModal";
 import { SearchProvider, useSearchQuery } from "@/state/Search";
 import { useForum } from "../state/Forum";
+import { markWelcomeSeen } from "../state/welcome";
 import { useWalletAuth } from "@/wallet";
 
 /**
@@ -213,7 +213,8 @@ const DesktopLayout: FC = () => {
 
 const MobileLayout: FC = () => {
   const { isUserVerified } = useUserVotes();
-  const [writeModalOpen, setWriteModalOpen] = useState(false);
+  const forumNavigate = useForumNavigate();
+  const isWritePage = useLocation().pathname.endsWith("/write");
 
   return (
     <Box
@@ -244,24 +245,22 @@ const MobileLayout: FC = () => {
 
       <BottomNav />
 
-      <Fab
-        color="primary"
-        aria-label="write"
-        onClick={() => setWriteModalOpen(true)}
-        disabled={!isUserVerified}
-        sx={{
-          position: "fixed",
-          bottom: 80,
-          right: 24,
-          zIndex: 1201,
-        }}
-      >
-        <CreateIcon />
-      </Fab>
-      <CreateStatementModal
-        open={writeModalOpen}
-        onClose={() => setWriteModalOpen(false)}
-      />
+      {!isWritePage && (
+        <Fab
+          color="primary"
+          aria-label="write"
+          onClick={() => void forumNavigate("/write")}
+          disabled={!isUserVerified}
+          sx={{
+            position: "fixed",
+            bottom: 80,
+            right: 24,
+            zIndex: 1201,
+          }}
+        >
+          <CreateIcon />
+        </Fab>
+      )}
     </Box>
   );
 };
@@ -277,6 +276,13 @@ const Root: FC = () => {
     abandonOutdatedChanges,
   } = useUserVotes();
   useForumSlugSync();
+
+  // A connected user is clearly not a first-time visitor, so never route them
+  // through the welcome screen again (covers deep-link and new-device logins).
+  const { address } = useWalletAuth();
+  useEffect(() => {
+    if (address) markWelcomeSeen();
+  }, [address]);
 
   return (
     <SearchProvider>
