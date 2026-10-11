@@ -334,7 +334,16 @@ const StatementCardComponent: FC<StatementCardProps> = ({
     blockNumber: blockNumber ? blockNumber - LOOK_BACK_BLOCKS : undefined,
     query: {
       enabled: !!blockNumber,
-      placeholderData: (prev) => prev,
+      // Bridge the gap while the look-back block advances, but never show data
+      // from another forum or statement (cards stay mounted across forum
+      // switches when ids coincide).
+      placeholderData: (prev, prevQuery) => {
+        const prevParams = prevQuery?.queryKey[1];
+        return prevParams?.address === forumContractAddress &&
+          prevParams.args?.[0]?.[0] === statement.id
+          ? prev
+          : undefined;
+      },
     },
   });
 

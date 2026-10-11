@@ -7,6 +7,7 @@ import React, {
   useMemo,
   useReducer,
   useRef,
+  useState,
   useSyncExternalStore,
 } from "react";
 import {
@@ -200,6 +201,11 @@ type RestoreStaged = {
   };
 };
 
+/** Discard all forum/account-specific state (forum, account or chain changed). */
+type ResetScope = {
+  type: "RESET_SCOPE";
+};
+
 type UserSupportAction =
   | SyncOnChainState
   | StageUserSupport
@@ -219,7 +225,8 @@ type UserSupportAction =
   | UnstageStatement
   | UpdateStagedInitialSupport
   | SetPendingDraftCost
-  | RestoreStaged;
+  | RestoreStaged
+  | ResetScope;
 
 // Quadratic cost for a given support level (in credit parts).
 // Matches the on-chain formula: s*(s+M)/(2*M) where M = creditMultiplier.
@@ -435,10 +442,29 @@ const stagedHasContent = (staged?: StagedSupport): boolean =>
   (staged?.supportAdjustments.size ?? 0) > 0 ||
   (staged?.stagedStatements.length ?? 0) > 0;
 
+const INITIAL_USER_SUPPORT_STATE: UserSupportState = {
+  onChain: undefined,
+  staged: undefined,
+  hasStagedChanges: false,
+  hasEnoughCredits: true,
+  commitStatus: "idle",
+  isOutdated: false,
+  pendingDraftCost: 0,
+};
+
 const reducer = (
   state: UserSupportState,
   action: UserSupportAction & { creditMultiplier: number },
 ): UserSupportState => {
+  if (action.type === "RESET_SCOPE") {
+    // The in-progress draft cost belongs to a still-mounted draft component,
+    // which clears it itself on unmount.
+    return {
+      ...INITIAL_USER_SUPPORT_STATE,
+      pendingDraftCost: state.pendingDraftCost,
+    };
+  }
+
   let newState = { ...state };
 
   switch (action.type) {
@@ -855,15 +881,7 @@ export const SupportStoreContext = createContext<SupportStoreValue | undefined>(
 export const UserVoteProvider: FC<{
   children: React.ReactNode;
 }> = ({ children }) => {
-  const [state, rawDispatch] = useReducer(reducer, {
-    onChain: undefined,
-    staged: undefined,
-    hasStagedChanges: false,
-    hasEnoughCredits: true,
-    commitStatus: "idle",
-    isOutdated: false,
-    pendingDraftCost: 0,
-  });
+  const [state, rawDispatch] = useReducer(reducer, INITIAL_USER_SUPPORT_STATE);
   const { writeContract, previewNetworkFee } = useContractWrite();
   const {
     address: participantAddress,
@@ -884,6 +902,24 @@ export const UserVoteProvider: FC<{
     (action: UserSupportAction) => rawDispatch({ ...action, creditMultiplier }),
     [creditMultiplier],
   );
+
+  // ── Scope isolation ─────────────────────────────────────────────────────
+  // This provider sits above the router and stays mounted across forum and
+  // account switches, so all reducer state (on-chain snapshot, staged changes,
+  // in-flight commit) must be discarded whenever the scope changes. Resetting
+  // during render (rather than in an effect) guarantees no effect ever sees the
+  // new scope's storage keys paired with the previous scope's state, which
+  // would otherwise persist one forum's staged changes under another's key.
+  const scopeKey = `${chainFingerprint ?? ""}:${forumName}:${participantAddress ?? ""}`;
+  // `generation` increments on every reset so the storage-restore effects
+  // below re-run even when returning to a previously restored key (A→B→A).
+  const [scope, setScope] = useState({ key: scopeKey, generation: 0 });
+  if (scope.key !== scopeKey) {
+    setScope({ key: scopeKey, generation: scope.generation + 1 });
+    rawDispatch({ type: "RESET_SCOPE", creditMultiplier });
+  }
+  const scopeKeyRef = useRef(scopeKey);
+  scopeKeyRef.current = scopeKey;
 
   // ── External store bridge for selective per-statement subscriptions ─────────
   // Keep the latest reducer state in a ref so the store getters (which are
@@ -1053,6 +1089,9 @@ export const UserVoteProvider: FC<{
     onChainUserBalance,
     onChainUserLastUpdated,
     dispatch,
+    // Re-sync after a scope reset even if the query data is referentially
+    // unchanged (e.g. cached from an earlier visit to this forum).
+    scopeKey,
   ]);
 
   // ── Staged-support persistence ──────────────────────────────────────────
@@ -1066,9 +1105,10 @@ export const UserVoteProvider: FC<{
       : undefined;
   const restoredKeyRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!persistKey || !state.staged || restoredKeyRef.current === persistKey)
-      return;
-    restoredKeyRef.current = persistKey;
+    if (!persistKey || !state.staged) return;
+    const restoreKey = `${scope.generation}:${persistKey}`;
+    if (restoredKeyRef.current === restoreKey) return;
+    restoredKeyRef.current = restoreKey;
     const saved = loadStagedFromStorage(persistKey);
     if (
       saved &&
@@ -1076,7 +1116,7 @@ export const UserVoteProvider: FC<{
     ) {
       dispatch({ type: "RESTORE_STAGED", payload: saved });
     }
-  }, [persistKey, state.staged, dispatch]);
+  }, [persistKey, scope.generation, state.staged, dispatch]);
   useEffect(() => {
     if (!persistKey || !state.staged) return;
     if (
@@ -1106,9 +1146,10 @@ export const UserVoteProvider: FC<{
       : undefined;
   const restoredPendingKeyRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!pendingCommitKey || restoredPendingKeyRef.current === pendingCommitKey)
-      return;
-    restoredPendingKeyRef.current = pendingCommitKey;
+    if (!pendingCommitKey) return;
+    const restoreKey = `${scope.generation}:${pendingCommitKey}`;
+    if (restoredPendingKeyRef.current === restoreKey) return;
+    restoredPendingKeyRef.current = restoreKey;
     const saved = loadPendingCommitFromStorage(pendingCommitKey);
     if (saved) {
       dispatch({
@@ -1119,7 +1160,7 @@ export const UserVoteProvider: FC<{
         },
       });
     }
-  }, [pendingCommitKey, dispatch]);
+  }, [pendingCommitKey, scope.generation, dispatch]);
   useEffect(() => {
     if (!pendingCommitKey) return;
     if (state.pendingTxHash && state.submittedFromLastUpdated !== undefined) {
@@ -1298,6 +1339,13 @@ export const UserVoteProvider: FC<{
           dispatch({ type: "BEGIN_SUBMISSION" });
         }
 
+        // If the user switches forum/account while the wallet is signing, the
+        // result belongs to the original scope and must not touch the new one.
+        const commitScopeKey = scopeKey;
+        const commitPendingKey = pendingCommitKey;
+        const commitFromLastUpdated = state.onChain?.lastUpdated;
+        const scopeChanged = () => scopeKeyRef.current !== commitScopeKey;
+
         try {
           const request = await buildCommitRequest();
           if (!request) {
@@ -1310,8 +1358,23 @@ export const UserVoteProvider: FC<{
             uiOptions: { showWalletUIs: false },
           });
 
+          if (scopeChanged()) {
+            // Record it under the original forum so returning there resumes
+            // tracking and reconciles via lastUpdated.
+            if (commitPendingKey && commitFromLastUpdated !== undefined) {
+              savePendingCommitToStorage(
+                commitPendingKey,
+                txHash,
+                commitFromLastUpdated,
+              );
+            }
+            return;
+          }
+
           dispatch({ type: "COMMIT_SUBMITTED", payload: { txHash } });
         } catch (err: unknown) {
+          if (scopeChanged()) return;
+
           if (err instanceof BaseError) {
             if (err.shortMessage?.toLowerCase().includes("rejected")) {
               dispatch({ type: "COMMIT_CANCELLED" });
@@ -1331,6 +1394,8 @@ export const UserVoteProvider: FC<{
       participantAddress,
       walletKind,
       dispatch,
+      scopeKey,
+      pendingCommitKey,
     ],
   );
 

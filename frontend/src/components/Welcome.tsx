@@ -1,5 +1,5 @@
-import { FC } from "react";
-import { useNavigate } from "react-router-dom";
+import { FC, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Box, Button, Container, Stack, Typography } from "@mui/material";
 import ExploreIcon from "@mui/icons-material/Explore";
 import VerifiedUserIcon from "@mui/icons-material/VerifiedUser";
@@ -9,6 +9,7 @@ import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import useLogoSrc from "@/hooks/useLogoSrc";
 import { getStoredForumSlug } from "../state/Forum";
 import { markWelcomeSeen } from "../state/welcome";
+import { useWalletAuth } from "@/wallet";
 
 type Pillar = {
   icon: React.ReactNode;
@@ -41,7 +42,9 @@ const pillars: Pillar[] = [
  */
 const Welcome: FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const logoSrc = useLogoSrc();
+  const { address } = useWalletAuth();
 
   const enter = (path: string) => {
     markWelcomeSeen();
@@ -49,6 +52,19 @@ const Welcome: FC = () => {
   };
 
   const slug = getStoredForumSlug();
+
+  // Connected users skip the automatic welcome (e.g. a returning user on a new
+  // device). An explicit visit, such as "Show the welcome screen" in How it
+  // works, carries no redirect state and still renders the page.
+  const fromRootRedirect =
+    (location.state as { fromRootRedirect?: boolean } | null)
+      ?.fromRootRedirect === true;
+  useEffect(() => {
+    if (address && fromRootRedirect) {
+      markWelcomeSeen();
+      void navigate(`/${slug}`, { replace: true });
+    }
+  }, [address, fromRootRedirect, navigate, slug]);
 
   return (
     <Box
