@@ -14,6 +14,7 @@ import {
   Card,
   InputBase,
   Stack,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import { useForumNavigate } from "../hooks/useForumNavigate";
@@ -29,8 +30,11 @@ import {
   formatCountdown,
   supportCreditsToAllocatedCredits,
   supportCreditsToAllocatedParts,
+  truncateToUtf8Bytes,
+  utf8ByteLength,
 } from "../util";
 
+// Measured in UTF-8 bytes to match the on-chain `maxStatementLength` check.
 const MAX_STATEMENT_LENGTH = 120;
 const DRAFT_SAVE_DEBOUNCE_MS = 300;
 
@@ -243,7 +247,7 @@ const CreateStatementForm: FC = () => {
 
     const draft = loadDraftFromStorage(draftStorageKey);
     if (draft) {
-      setText(draft.text.slice(0, MAX_STATEMENT_LENGTH));
+      setText(truncateToUtf8Bytes(draft.text, MAX_STATEMENT_LENGTH));
       setInitialSupport(draft.initialSupport);
     }
     setHasHydratedDraft(true);
@@ -271,10 +275,12 @@ const CreateStatementForm: FC = () => {
 
   // ── Handlers ───────────────────────────────────────────────────────────
   const updateText = useCallback((textVal: string) => {
-    if (textVal.length <= MAX_STATEMENT_LENGTH) {
+    if (utf8ByteLength(textVal) <= MAX_STATEMENT_LENGTH) {
       setText(textVal);
     }
   }, []);
+
+  const textLength = utf8ByteLength(text);
 
   // Keep the credit bar in sync with the draft's initial support (cost in credit parts)
   const draftCreditCost = supportCreditsToAllocatedParts(
@@ -346,23 +352,25 @@ const CreateStatementForm: FC = () => {
             justifyContent="space-between"
             spacing={1}
           >
-            <Typography
-              variant="body2"
-              sx={{
-                textAlign: "right",
-                fontWeight:
-                  text.length < MAX_STATEMENT_LENGTH * 0.9 ? "normal" : "bold",
-              }}
-              color={
-                text.length < MAX_STATEMENT_LENGTH * 0.8
-                  ? "text.secondary"
-                  : text.length < MAX_STATEMENT_LENGTH * 0.9
-                    ? "DarkOrange"
-                    : "red"
-              }
-            >
-              {text.length} / {MAX_STATEMENT_LENGTH}
-            </Typography>
+            <Tooltip title="Length is measured in bytes. Emoji and many non-Latin characters use 2–4 bytes each.">
+              <Typography
+                variant="body2"
+                sx={{
+                  textAlign: "right",
+                  fontWeight:
+                    textLength < MAX_STATEMENT_LENGTH * 0.9 ? "normal" : "bold",
+                }}
+                color={
+                  textLength < MAX_STATEMENT_LENGTH * 0.8
+                    ? "text.secondary"
+                    : textLength < MAX_STATEMENT_LENGTH * 0.9
+                      ? "DarkOrange"
+                      : "red"
+                }
+              >
+                {textLength} / {MAX_STATEMENT_LENGTH}
+              </Typography>
+            </Tooltip>
             <SupportVoteControls
               userSupport={initialSupport}
               uncommittedSupport={initialSupport !== 0}
