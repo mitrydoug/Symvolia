@@ -11,20 +11,40 @@ import { useActiveWallet } from "./useActiveWallet";
  * know what kind of wallet is connected.
  */
 export const useWalletAuth = () => {
-  const { ready, authenticated, login, logout } = usePrivy();
+  const { ready, authenticated, user, login, logout } = usePrivy();
   const { wallets, ready: walletsReady } = useWallets();
   const { address, activeWallet, kind } = useActiveWallet();
   const { disconnect: disconnectWagmi } = useDisconnect();
 
-  // Sign out if an authenticated user has no connected wallet (e.g. an external
-  // wallet disconnected out-of-app). Gated on Privy's `walletsReady`, not
-  // wagmi's status, which is briefly `disconnected` during the connect window.
+  // Email/passkey users get an embedded wallet that Privy creates (for new
+  // users) or restores asynchronously *after* authentication, so an empty
+  // `wallets` list is expected during that window. Logging out then would abort
+  // wallet creation and leave new users permanently walletless.
+  const usesEmbeddedWallet =
+    user?.linkedAccounts.some(
+      (account) =>
+        account.type === "email" ||
+        account.type === "passkey" ||
+        (account.type === "wallet" && account.walletClientType === "privy"),
+    ) ?? false;
+
+  // Sign out if an authenticated external-wallet user has no connected wallet
+  // (e.g. the wallet disconnected out-of-app). Gated on Privy's `walletsReady`,
+  // not wagmi's status, which is briefly `disconnected` during the connect
+  // window.
   useEffect(() => {
-    if (!ready || !walletsReady) return;
+    if (!ready || !walletsReady || usesEmbeddedWallet) return;
     if (authenticated && wallets.length === 0) {
       void logout();
     }
-  }, [ready, walletsReady, authenticated, wallets.length, logout]);
+  }, [
+    ready,
+    walletsReady,
+    usesEmbeddedWallet,
+    authenticated,
+    wallets.length,
+    logout,
+  ]);
 
   const connect = useCallback(() => {
     // Open the Privy login modal; no-op if already authenticated.
