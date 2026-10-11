@@ -37,6 +37,31 @@ export const supportCreditsToAllocatedParts = (
     creditMultiplier,
   );
 
+const utf8Encoder = new TextEncoder();
+
+/**
+ * Length of `text` in UTF-8 bytes — the unit `Forum.addStatement` enforces
+ * `maxStatementLength` in (`bytes(text).length`). JS `string.length` counts
+ * UTF-16 code units instead, which under-counts everything outside ASCII:
+ * Cyrillic/Greek/Arabic use 2 bytes per character, CJK 3, and emoji 4 or more.
+ */
+export const utf8ByteLength = (text: string): number =>
+  utf8Encoder.encode(text).length;
+
+/**
+ * Trim `text` to at most `maxBytes` UTF-8 bytes without splitting a character.
+ */
+export const truncateToUtf8Bytes = (text: string, maxBytes: number): string => {
+  let bytes = 0;
+  let result = "";
+  for (const char of text) {
+    bytes += utf8ByteLength(char);
+    if (bytes > maxBytes) break;
+    result += char;
+  }
+  return result;
+};
+
 /**
  * Truncate an Ethereum address to `0x1a2B…3c4D` format.
  * Shows the first 6 and last 4 hex characters (industry standard).
@@ -58,9 +83,9 @@ export const boringAvatarDataUri = (seed: string): string => {
     createElement(Avatar, {
       name: seed,
       size: 80,
-      variant: "marble",
+      variant: "beam",
       square: true,
-      colors: ["#e6626f", "#efae78", "#f5e19c", "#a2ca8e", "#66af91"],
+      colors: ["#1A3C6E", "#F39150", "#7EB77F", "#FFD131"],
     }),
   );
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;

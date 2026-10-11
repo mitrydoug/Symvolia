@@ -42,7 +42,9 @@ import useIsMobileVisitor from "./hooks/useIsMobileVisitor.ts";
  */
 const RootRedirect: FC = () => {
   if (!hasSeenWelcome()) {
-    return <Navigate to="/welcome" replace />;
+    return (
+      <Navigate to="/welcome" replace state={{ fromRootRedirect: true }} />
+    );
   }
   const slug = getStoredForumSlug();
   return <Navigate to={`/${slug}`} replace />;

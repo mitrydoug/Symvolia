@@ -33,13 +33,15 @@ const FORUM_STORAGE_KEY = "symvolia:selectedForum";
 
 /**
  * Keys that must survive a chain-fingerprint sweep because they are either
- * chain-agnostic (selected forum, user settings) or already scoped by address
- * (nickname).
+ * chain-agnostic (selected forum, user settings, welcome dismissal) or already
+ * scoped by address (nickname). Any new chain-agnostic `symvolia:` key MUST be
+ * listed here, otherwise it is wiped on every page load.
  */
 const SWEEP_EXEMPT_PREFIXES = [
   "symvolia:selectedForum",
   "symvolia:nickname:",
   "symvolia:settings:",
+  "symvolia:welcome:",
 ];
 
 /**
