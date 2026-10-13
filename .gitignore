@@ -8,3 +8,5 @@ railway-variables.env
 # Local development
 .overmind.sock
 .dev/
+
+/scratch/

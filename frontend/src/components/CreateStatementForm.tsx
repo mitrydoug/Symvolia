@@ -142,80 +142,80 @@ const CreateStatementForm: FC = () => {
     statementsAvailable === null
       ? null
       : (() => {
-          const available = statementsAvailable;
-          const staged = stagedStatementCount;
+        const available = statementsAvailable;
+        const staged = stagedStatementCount;
 
-          if (staged === 0) {
-            return available === 0
-              ? {
-                  severity: "warning" as const,
-                  content: (
-                    <>
-                      You&apos;ve used all your statements for now.{" "}
-                      {secondsUntilNextStatement > 0 ? (
-                        <>
-                          You can add another in{" "}
-                          <strong>
-                            {formatCountdown(secondsUntilNextStatement)}
-                          </strong>
-                          .
-                        </>
-                      ) : (
-                        <>
-                          You can add another now — refreshing your allowance…
-                        </>
-                      )}
-                    </>
-                  ),
-                }
-              : {
-                  severity: "info" as const,
-                  content: (
-                    <>
-                      You can create up to <strong>{available}</strong>{" "}
-                      {available === 1 ? "statement" : "statements"} at this
-                      time.
-                    </>
-                  ),
-                };
-          }
-
-          if (staged < available) {
-            return {
-              severity: "info" as const,
-              content: (
-                <>
-                  You&apos;ve staged <strong>{staged}</strong> of{" "}
-                  <strong>{available}</strong> available statements.
-                </>
-              ),
-            };
-          }
-
-          if (staged === available) {
-            return {
+        if (staged === 0) {
+          return available === 0
+            ? {
               severity: "warning" as const,
               content: (
                 <>
-                  You&apos;ve staged <strong>{available}</strong> of{" "}
-                  <strong>{available}</strong> available statements. Submit or
-                  remove a staged statement.
+                  You&apos;ve used all your statements for now.{" "}
+                  {secondsUntilNextStatement > 0 ? (
+                    <>
+                      You can add another in{" "}
+                      <strong>
+                        {formatCountdown(secondsUntilNextStatement)}
+                      </strong>
+                      .
+                    </>
+                  ) : (
+                    <>
+                      You can add another now — refreshing your allowance…
+                    </>
+                  )}
+                </>
+              ),
+            }
+            : {
+              severity: "info" as const,
+              content: (
+                <>
+                  You can create up to <strong>{available}</strong>{" "}
+                  {available === 1 ? "statement" : "statements"} at this
+                  time.
                 </>
               ),
             };
-          }
+        }
 
+        if (staged < available) {
+          return {
+            severity: "info" as const,
+            content: (
+              <>
+                You&apos;ve staged <strong>{staged}</strong> of{" "}
+                <strong>{available}</strong> available statements.
+              </>
+            ),
+          };
+        }
+
+        if (staged === available) {
           return {
             severity: "warning" as const,
             content: (
               <>
-                You&apos;ve staged more statements than your allowance currently
-                permits. Submit or remove a staged statement before adding
-                another.
+                You&apos;ve staged <strong>{available}</strong> of{" "}
+                <strong>{available}</strong> available statements. Submit or
+                remove a staged statement.
               </>
             ),
           };
-        })();
+        }
+
+        return {
+          severity: "warning" as const,
+          content: (
+            <>
+              You&apos;ve staged more statements than your allowance currently
+              permits. Submit or remove a staged statement before adding
+              another.
+            </>
+          ),
+        };
+      })();
 
   const draftStorageKey = useMemo(() => {
     if (!chainFingerprint) return undefined;
@@ -375,7 +375,6 @@ const CreateStatementForm: FC = () => {
               userSupport={initialSupport}
               uncommittedSupport={initialSupport !== 0}
               onUserVoteChange={setInitialSupport}
-              onClear={() => setInitialSupport(0)}
               creditsTooltip={`This statement will use ${supportCreditsToAllocatedCredits(initialSupport)} credits for ${initialSupport} support`}
             />
           </Stack>

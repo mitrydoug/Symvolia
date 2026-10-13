@@ -64,7 +64,6 @@ const StagedStatementCard: FC<StagedStatementCardProps> = ({
       onUserVoteChange={(newCreditSupport) =>
         onUpdateSupport(staged.tempId, toParts(newCreditSupport))
       }
-      onClear={() => onUpdateSupport(staged.tempId, 0)}
       creditsTooltip={`This pending statement will use ${(Math.abs(initialSupportCredits) * (Math.abs(initialSupportCredits) + 1)) / 2} credits for ${initialSupportCredits} support`}
     />
   ) : undefined;
@@ -80,7 +79,7 @@ const StagedStatementCard: FC<StagedStatementCardProps> = ({
         borderLeft: "3.5px solid",
         borderColor:
           theme.custom.colors.stagedSupport[
-            theme.palette.mode === "dark" ? "dark" : "light"
+          theme.palette.mode === "dark" ? "dark" : "light"
           ],
       }}
     />

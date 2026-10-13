@@ -308,7 +308,7 @@ const StatementCardComponent: FC<StatementCardProps> = ({
   const theme = useTheme();
   const stagedSupportColor =
     theme.custom.colors.stagedSupport[
-      theme.palette.mode === "dark" ? "dark" : "light"
+    theme.palette.mode === "dark" ? "dark" : "light"
     ];
   const handleCardClick = useCallback(() => {
     void navigate(`/statement/${statement.id}`);
@@ -324,7 +324,7 @@ const StatementCardComponent: FC<StatementCardProps> = ({
   const { forumContractAddress } = useForum();
   const { toCredits, toParts } = useCreditConversion();
 
-  const { blockNumber } = useBlockSync(() => {});
+  const { blockNumber } = useBlockSync(() => { });
 
   const { data: historicalData } = useReadContract({
     address: forumContractAddress,
@@ -384,13 +384,13 @@ const StatementCardComponent: FC<StatementCardProps> = ({
       const adjustment =
         newCreditSupport === 0
           ? {
-              value: 0,
-              adjustmentType: SupportAdjustmentType.SetTo,
-            }
+            value: 0,
+            adjustmentType: SupportAdjustmentType.SetTo,
+          }
           : {
-              value: toParts(newCreditSupport - onChainCredits),
-              adjustmentType: SupportAdjustmentType.Delta,
-            };
+            value: toParts(newCreditSupport - onChainCredits),
+            adjustmentType: SupportAdjustmentType.Delta,
+          };
       dispatch({
         type: "STAGE_USER_SUPPORT",
         payload: {
@@ -432,9 +432,9 @@ const StatementCardComponent: FC<StatementCardProps> = ({
   const rankingProgress =
     rankingThreshold !== undefined
       ? rankingProgressPercent(
-          Number(statement.support),
-          Number(rankingThreshold),
-        )
+        Number(statement.support),
+        Number(rankingThreshold),
+      )
       : null;
 
   const globalSupport = toCredits(Number(statement.support));
@@ -586,7 +586,6 @@ const StatementCardComponent: FC<StatementCardProps> = ({
         userSupport={userSupport}
         uncommittedSupport={hasUncommittedSupport}
         onUserVoteChange={handleSupportChange}
-        onClear={() => handleSupportChange(0)}
         creditsTooltip={`You have ${supportCreditsToAllocatedCredits(userSupport)} credits providing ${userSupport} support`}
       />
     ) : isVerifiedLoading || isWalletLoading ? undefined : (

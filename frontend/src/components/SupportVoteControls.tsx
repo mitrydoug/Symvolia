@@ -33,7 +33,6 @@ type SupportVoteControlsProps = {
   userSupport: number;
   uncommittedSupport: boolean;
   onUserVoteChange: (newVoteCount: number) => void;
-  onClear?: () => void;
   creditsTooltip?: string;
 };
 
@@ -41,7 +40,6 @@ const SupportVoteControls: FC<SupportVoteControlsProps> = ({
   userSupport,
   uncommittedSupport,
   onUserVoteChange,
-  onClear,
   creditsTooltip,
 }) => {
   const creditsAllocated = supportCreditsToAllocatedCredits(userSupport);
@@ -84,7 +82,6 @@ const SupportVoteControls: FC<SupportVoteControlsProps> = ({
             uncommittedSupport={uncommittedSupport}
             onUserVoteChange={onUserVoteChange}
             direction="compact"
-            onClear={onClear}
           />
         </Box>
       </Stack>

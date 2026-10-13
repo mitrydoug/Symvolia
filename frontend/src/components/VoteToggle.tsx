@@ -1,26 +1,34 @@
-import { FC } from "react";
+import { ChangeEvent, FC, KeyboardEvent, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Stack from "@mui/material/Stack";
 import ButtonBase from "@mui/material/ButtonBase";
+import Popover from "@mui/material/Popover";
+import InputBase from "@mui/material/InputBase";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import ArrowDropUpIcon from "@mui/icons-material/ArrowDropUp";
 import ArrowDropDownIcon from "@mui/icons-material/ArrowDropDown";
-import CloseIcon from "@mui/icons-material/Close";
 
 interface VoteToggleProps {
   userSupport: number;
   uncommittedSupport: boolean;
   onUserVoteChange: (newVoteCount: number) => void;
   direction?: "horizontal" | "vertical" | "compact";
-  /**
-   * When provided (compact variant), renders an integrated clear (×) segment
-   * on the left of the pill. Its width is reserved even when hidden so the
-   * −/+ controls never shift.
-   */
-  onClear?: () => void;
 }
+
+/** Upper bound on |support| accepted from the free-form input. */
+const MAX_SUPPORT_INPUT_DIGITS = 4;
+/** Optional leading minus followed by up to MAX_SUPPORT_INPUT_DIGITS digits (may be partial while typing). */
+const SUPPORT_INPUT_PATTERN = new RegExp(
+  `^-?\\d{0,${MAX_SUPPORT_INPUT_DIGITS}}$`,
+);
+
+/** Parses a validated draft into a support value; empty or "-" means 0. */
+const parseSupportInput = (draft: string): number => {
+  const parsed = Number.parseInt(draft, 10);
+  return Number.isSafeInteger(parsed) ? parsed : 0;
+};
 
 interface SupportButtonProps {
   label: string;
@@ -67,79 +75,87 @@ const SupportButton: FC<SupportButtonProps> = ({
   );
 };
 
-const VoteToggle: FC<VoteToggleProps> = ({
+const CompactVoteToggle: FC<Omit<VoteToggleProps, "direction">> = ({
   userSupport,
   uncommittedSupport,
   onUserVoteChange,
-  direction = "horizontal",
-  onClear,
 }) => {
-  if (direction === "compact") {
-    const numberColor =
-      userSupport > 0
-        ? "success.main"
-        : userSupport < 0
-          ? "error.main"
-          : "text.secondary";
-    const canClear = Boolean(onClear);
-    const showClear = canClear && userSupport !== 0;
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
-    return (
-      <Box
+  const numberColor =
+    userSupport > 0
+      ? "success.main"
+      : userSupport < 0
+        ? "error.main"
+        : "text.secondary";
+
+  const openEditor = (target: HTMLElement) => {
+    setDraft(userSupport === 0 ? "" : String(userSupport));
+    setAnchorEl(target);
+  };
+
+  const closeEditor = (commit: boolean) => {
+    if (commit) {
+      const next = parseSupportInput(draft);
+      if (next !== userSupport) onUserVoteChange(next);
+    }
+    setAnchorEl(null);
+  };
+
+  const handleDraftChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.trim();
+    if (SUPPORT_INPUT_PATTERN.test(value)) setDraft(value);
+  };
+
+  const handleDraftKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      closeEditor(true);
+    }
+  };
+
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        borderRadius: 999,
+        bgcolor: "action.hover",
+        border: "1px solid",
+        borderColor: "transparent",
+        px: 0.75,
+      }}
+    >
+      <ButtonBase
+        aria-label="Increase support"
+        onClick={() => onUserVoteChange(userSupport + 1)}
         sx={{
-          display: "flex",
-          alignItems: "center",
-          borderRadius: 999,
-          bgcolor: "action.hover",
-          border: "1px solid",
-          borderColor: "transparent",
-          px: 0.75,
+          width: 16,
+          height: 22,
+          borderRadius: 1,
+          color: "text.secondary",
+          "&:hover": { color: "success.main" },
         }}
       >
-        {showClear && (
-          <Box
-            sx={{
-              width: 14,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            <ButtonBase
-              aria-label="Clear support"
-              onClick={onClear}
-              sx={{
-                width: 14,
-                height: 14,
-                borderRadius: "50%",
-                color: "text.disabled",
-                "&:hover": { color: "text.primary" },
-              }}
-            >
-              <CloseIcon sx={{ fontSize: 12 }} />
-            </ButtonBase>
-          </Box>
-        )}
-        <ButtonBase
-          aria-label="Decrease support"
-          onClick={() => onUserVoteChange(userSupport - 1)}
-          sx={{
-            width: 14,
-            height: 22,
-            borderRadius: 1,
-            color: "text.secondary",
-            "&:hover": { color: "error.main" },
-          }}
-        >
-          <ArrowDropDownIcon sx={{ fontSize: 24 }} />
-        </ButtonBase>
+        <ArrowDropUpIcon sx={{ fontSize: 28 }} />
+      </ButtonBase>
+      <ButtonBase
+        aria-label="Edit support"
+        aria-haspopup="dialog"
+        onClick={(e) => openEditor(e.currentTarget)}
+        sx={{
+          minWidth: 12,
+          mx: 0.5,
+          borderRadius: 1,
+          "&:hover": { bgcolor: "action.selected" },
+        }}
+      >
         <Typography
           variant="body2"
           sx={{
             fontWeight: uncommittedSupport ? 700 : 600,
-            minWidth: 12,
-            mx: 0.5,
             textAlign: "center",
             color: numberColor,
             fontVariantNumeric: "tabular-nums",
@@ -147,20 +163,100 @@ const VoteToggle: FC<VoteToggleProps> = ({
         >
           {userSupport}
         </Typography>
-        <ButtonBase
-          aria-label="Increase support"
-          onClick={() => onUserVoteChange(userSupport + 1)}
-          sx={{
-            width: 14,
-            height: 22,
-            borderRadius: 1,
-            color: "text.secondary",
-            "&:hover": { color: "success.main" },
+      </ButtonBase>
+      <ButtonBase
+        aria-label="Decrease support"
+        onClick={() => onUserVoteChange(userSupport - 1)}
+        sx={{
+          width: 16,
+          height: 22,
+          borderRadius: 1,
+          color: "text.secondary",
+          "&:hover": { color: "error.main" },
+        }}
+      >
+        <ArrowDropDownIcon sx={{ fontSize: 28 }} />
+      </ButtonBase>
+      <Popover
+        open={Boolean(anchorEl)}
+        anchorEl={anchorEl}
+        // Clicking away applies the typed value; Escape discards it.
+        onClose={(_e, reason) => closeEditor(reason !== "escapeKeyDown")}
+        anchorOrigin={{ vertical: "top", horizontal: "center" }}
+        transformOrigin={{ vertical: "bottom", horizontal: "center" }}
+        slotProps={{
+          // Focus + select once the open transition finishes; focusing on
+          // mount can be lost while the Popover sets up its focus trap.
+          transition: {
+            onEntered: () => {
+              inputRef.current?.focus();
+              inputRef.current?.select();
+            },
+          },
+          paper: {
+            sx: {
+              // Popover positions via `top`, so lift with a negative margin to
+              // leave room for the notch.
+              mt: "-10px",
+              px: 0.5,
+              py: 0.25,
+              overflow: "visible",
+              // Notch pointing down at the vote number.
+              "&::before": {
+                content: '""',
+                position: "absolute",
+                bottom: -4,
+                left: "50%",
+                width: 8,
+                height: 8,
+                bgcolor: "background.paper",
+                transform: "translateX(-50%) rotate(45deg)",
+                boxShadow: "2px 2px 2px -1px rgba(0, 0, 0, 0.15)",
+              },
+            },
+          },
+        }}
+      >
+        <InputBase
+          autoFocus
+          inputRef={inputRef}
+          value={draft}
+          placeholder="0"
+          onChange={handleDraftChange}
+          onKeyDown={handleDraftKeyDown}
+          onFocus={(e) => e.target.select()}
+          inputProps={{
+            inputMode: "numeric",
+            "aria-label": "Support amount",
           }}
-        >
-          <ArrowDropUpIcon sx={{ fontSize: 24 }} />
-        </ButtonBase>
-      </Box>
+          sx={{
+            fontSize: "0.875rem",
+            "& .MuiInputBase-input": {
+              width: 40,
+              p: 0,
+              textAlign: "center",
+              fontVariantNumeric: "tabular-nums",
+            },
+          }}
+        />
+      </Popover>
+    </Box>
+  );
+};
+
+const VoteToggle: FC<VoteToggleProps> = ({
+  userSupport,
+  uncommittedSupport,
+  onUserVoteChange,
+  direction = "horizontal",
+}) => {
+  if (direction === "compact") {
+    return (
+      <CompactVoteToggle
+        userSupport={userSupport}
+        uncommittedSupport={uncommittedSupport}
+        onUserVoteChange={onUserVoteChange}
+      />
     );
   }
 
